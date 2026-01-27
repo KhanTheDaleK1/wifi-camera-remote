@@ -1,0 +1,160 @@
+:root {
+    --bg-color: #1a1a1a;
+    --text-color: #ffffff;
+    --accent-red: #ff3b30;
+    --accent-green: #34c759;
+    --accent-blue: #007aff;
+    --btn-bg: #333333;
+}
+
+body {
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    background-color: var(--bg-color);
+    color: var(--text-color);
+    margin: 0;
+    padding: 0;
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    height: 100vh;
+    text-align: center;
+}
+
+.container {
+    padding: 20px;
+    width: 100%;
+    max-width: 600px;
+}
+
+h1 {
+    margin-bottom: 2rem;
+}
+
+.selection-menu {
+    display: flex;
+    flex-direction: column;
+    gap: 20px;
+}
+
+.btn {
+    display: block;
+    padding: 20px;
+    border-radius: 12px;
+    text-decoration: none;
+    font-size: 1.2rem;
+    font-weight: bold;
+    color: white;
+    transition: transform 0.1s ease;
+    border: none;
+    cursor: pointer;
+}
+
+.btn:active {
+    transform: scale(0.98);
+}
+
+.btn-camera {
+    background-color: var(--accent-blue);
+}
+
+.btn-remote {
+    background-color: var(--btn-bg);
+    border: 2px solid var(--accent-blue);
+}
+
+/* Camera Page Specifics */
+.camera-container {
+    position: relative;
+    width: 100%;
+    height: 100vh;
+    background: black;
+    overflow: hidden;
+}
+
+#viewfinder {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+}
+
+.status-overlay {
+    position: absolute;
+    top: 20px;
+    left: 50%;
+    transform: translateX(-50%);
+    background: rgba(0,0,0,0.6);
+    padding: 8px 16px;
+    border-radius: 20px;
+    font-size: 0.9rem;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+.recording-dot {
+    width: 12px;
+    height: 12px;
+    background-color: #555;
+    border-radius: 50%;
+}
+
+.recording-dot.active {
+    background-color: var(--accent-red);
+    animation: pulse 1s infinite;
+}
+
+@keyframes pulse {
+    0% { opacity: 1; }
+    50% { opacity: 0.5; }
+    100% { opacity: 1; }
+}
+
+/* Remote Page Specifics */
+.remote-container {
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+    align-items: center;
+    height: 100vh;
+    gap: 30px;
+}
+
+#shutter-btn {
+    width: 200px;
+    height: 200px;
+    border-radius: 50%;
+    background-color: var(--bg-color);
+    border: 8px solid var(--text-color);
+    position: relative;
+    cursor: pointer;
+    transition: all 0.2s ease;
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    -webkit-tap-highlight-color: transparent;
+}
+
+#shutter-inner {
+    width: 160px;
+    height: 160px;
+    border-radius: 50%;
+    background-color: var(--accent-red);
+    transition: all 0.2s ease;
+}
+
+/* Recording State on Remote */
+#shutter-btn.recording {
+    border-color: var(--accent-red);
+}
+
+#shutter-btn.recording #shutter-inner {
+    width: 80px;
+    height: 80px;
+    border-radius: 12px; /* Square stop button */
+}
+
+.status-text {
+    font-size: 1.5rem;
+    font-weight: 500;
+    min-height: 2rem;
+}
