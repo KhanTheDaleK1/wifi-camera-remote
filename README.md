@@ -1,14 +1,13 @@
-# WiFi Camera Remote
+# WiFi Camera Remote (Studio Edition)
 
-Turn your smartphone into a high-quality, wireless webcam with professional controls, ASMR-ready audio, and direct OBS integration.
+Turn your smartphone into a high-quality, wireless webcam with professional controls, ASMR-ready audio, and **Multi-Camera Studio** support for OBS.
 
-## Features
-- **High Quality Video:** Up to 4K resolution (device dependent) with high bitrate (250 Mbps target).
-- **Pro Controls:** Manual focus, zoom, lens switching, and torch control.
-- **ASMR Audio:** High-fidelity 320kbps audio with echo cancellation and noise suppression disabled for raw, natural sound.
-- **Low Latency:** WebRTC-based streaming for near real-time performance.
-- **OBS Integration:** Dedicated views for video feed and a custom control dock.
-- **PWA Support:** Installable as a native-feeling app on your phone.
+## Key Features
+- **Multi-Camera Support:** Connect multiple phones and see them all in OBS simultaneously.
+- **Studio Controller:** Select which camera to control (Zoom, Focus, Lens) from a single dock.
+- **Smart Auto-Tuning:** Automatically detects device capabilities (iPhone 6 vs Pixel 9 Pro) and sets optimal resolution/bitrate to prevent overheating.
+- **ASMR Audio:** High-fidelity 320kbps audio with echo cancellation disabled for raw, natural sound.
+- **Extreme Quality:** Up to 4K resolution at 250 Mbps bitrate (on supported devices).
 
 ## Installation
 
@@ -24,57 +23,57 @@ Turn your smartphone into a high-quality, wireless webcam with professional cont
     ```
 
 3.  **Generate SSL Certificates:**
-    (Required for camera access and PWA features)
     ```bash
-    openssl req -nodes -new -x509 -keyout key.pem -out cert.pem -days 365 -subj "/C=US/ST=State/L=City/O=Organization/OU=Unit/CN=localhost"
+    bash scripts/generate_cert.sh
     ```
 
 4.  **Start the Server:**
     ```bash
-    node server.js
+    npm start
     ```
-    *Note: The server runs on HTTPS port 3001 (for phone) and HTTP port 3002 (for OBS).*
+    *   **HTTPS (Phones):** Port 3001
+    *   **HTTP (OBS):** Port 3002
 
 ## Usage Guide
 
-### 1. Connect Camera (Phone)
-1.  Ensure your phone and computer are on the same Wi-Fi network.
-2.  Open the **Server URL** displayed in your terminal (e.g., `https://192.168.1.X:3001`) on your phone.
-3.  Accept the security warning (due to self-signed certificates).
-4.  Click **"Start Camera"**.
-5.  **Install PWA (Recommended):**
-    *   **iOS:** Tap "Share" -> "Add to Home Screen".
-    *   **Android:** Tap the menu (three dots) -> "Install app" or "Add to Home screen".
-    *   *This prevents the phone from sleeping and hides browser UI bars.*
+### 1. Connect Cameras
+1.  Open the HTTPS URL (e.g., `https://192.168.1.X:3001`) on each phone.
+2.  Tap "Start Camera".
+3.  The system will auto-detect your hardware tier (Legacy, Standard, or Ultra) and tune the stream.
 
-### 2. Connect Remote (Laptop/Tablet)
-1.  Go to the same URL on another device.
-2.  Click **"Open Remote"**.
-3.  You can now see the feed and control zoom, focus, and recording.
+### 2. OBS Setup (Studio Mode)
+1.  **Video Feed:**
+    *   Add a **Browser Source**.
+    *   URL: `http://localhost:3002/obs.html`
+    *   Size: `1920x1080` (or your canvas size).
+    *   *This single source will display a grid of all connected cameras.*
+2.  **Control Dock:**
+    *   Go to **Docks** -> **Custom Browser Docks...**
+    *   Name: `Studio Control`
+    *   URL: `http://localhost:3002/control.html`
+    *   *Use the dropdown at the top to select which camera to control.*
 
-### 3. OBS Setup
-This tool is designed to work seamlessly with OBS Studio.
+## Advanced Features
 
-#### **Video Feed**
-1.  Add a **Browser** source in OBS.
-2.  Set URL to: `http://localhost:3002/obs.html` (or use your local IP instead of localhost if OBS is on a different machine).
-3.  Set Width/Height to match your camera settings (e.g., `1920` x `1080`).
-4.  Check **"Control audio via OBS"** to capture the ASMR audio.
+### Hardware Tiers
+The app automatically assigns a tier based on your device's encoder capabilities:
+- **Legacy (H.264):** 720p @ 30fps (Safe for older phones)
+- **Standard (HEVC):** 1080p @ 60fps
+- **Ultra (AV1):** 4K @ 60fps (Pixel 9 Pro / High-End)
 
-#### **Control Dock**
-1.  In OBS, go to **Docks** -> **Custom Browser Docks...**
-2.  Name: `Camera Control`
-3.  URL: `http://localhost:3002/control.html`
-4.  Click **Apply**.
-5.  You can now dock this panel anywhere in your OBS interface to control focus, zoom, and recording without leaving OBS.
+### Thermal Protection
+If the device starts to throttle (encoder latency > 25ms), the system will log a warning and automatically downgrade the stream to 720p to preserve the connection.
 
-## Advanced Settings
-- **ASMR Audio:** The audio is configured for raw capture (no processing) at 320kbps. **Use headphones** to monitor to avoid feedback loops!
-- **Video Quality:** The recorder attempts to use the efficient H.264 or VP9 codecs at a massive 250 Mbps bitrate for pristine recordings.
+### Bitrate Control
+In the Studio Dock, you can manually override the bitrate:
+- **250M:** Extreme quality (Local recording mostly)
+- **100M:** High quality streaming
+- **50M:** Stable streaming
+- **15M:** Standard (Good for weak Wi-Fi)
 
 ## Troubleshooting
-- **Black Screen?** Ensure both devices are on the same network. Refresh the camera page first, then the remote/OBS.
-- **Connection Failed?** Check your firewall settings to allow ports 3001 (TCP/UDP) and 3002.
+- **No Video in OBS?** Refresh the Browser Source cache.
+- **Controls not working?** Ensure you have selected the correct camera ID in the dock dropdown.
 - **Audio Feedback?** Mute the OBS source monitoring or use headphones.
 
 ---

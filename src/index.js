@@ -50,31 +50,78 @@ app.get('/network-info', async (req, res) => {
 io.on('connection', (socket) => {
     console.log('[Server] Connected:', socket.id);
 
-    socket.on('join-camera', () => socket.join('camera'));
-    socket.on('join-remote', () => socket.join('remote'));
-
-    // Signaling
-    socket.on('offer', (d) => io.to('remote').emit('offer', d));
-    socket.on('answer', (d) => io.to('camera').emit('answer', d));
-    socket.on('camera-candidate', (d) => io.to('remote').emit('camera-candidate', d));
-    socket.on('remote-candidate', (d) => io.to('camera').emit('remote-candidate', d));
-
-    // Commands
-    const cmds = ['start-recording', 'stop-recording', 'take-photo', 'switch-camera', 'switch-lens', 'control-camera', 'request-state', 'set-gain'];
-    cmds.forEach(cmd => {
-        socket.on(cmd, (payload) => io.to('camera').emit(cmd, payload));
+    // Camera Registration
+    socket.on('join-camera', (meta) => {
+        socket.join('camera');
+        socket.cameraMeta = meta || {}; // Store name/device info
+        console.log(`[Camera Joined] ${socket.id} - ${JSON.stringify(meta)}`);
+        io.to('remote').emit('camera-joined', { id: socket.id, meta: socket.cameraMeta });
     });
 
-    // Feedback
-    socket.on('camera-state', (s) => io.to('remote').emit('camera-state', s));
-    socket.on('camera-devices', (d) => io.to('remote').emit('camera-devices', d));
-    socket.on('camera-capabilities', (c) => io.to('remote').emit('camera-capabilities', c));
+    socket.on('join-remote', () => {
+        socket.join('remote');
+        // Send list of existing cameras to the new remote
+        const cameras = [];
+        const room = io.sockets.adapter.rooms.get('camera');
+        if (room) {
+            room.forEach(id => {
+                const s = io.sockets.sockets.get(id);
+                if (s) cameras.push({ id: s.id, meta: s.cameraMeta });
+            });
+        }
+        socket.emit('camera-list', cameras);
+    });
+
+    // Multi-Cam Signaling Routing
+    // Camera -> Remote: Wrap with ID
+    socket.on('offer', (payload) => {
+        io.to('remote').emit('offer', { from: socket.id, payload });
+    });
+    
+    socket.on('camera-candidate', (payload) => {
+        io.to('remote').emit('camera-candidate', { from: socket.id, payload });
+    });
+
+    // Remote -> Specific Camera
+    socket.on('answer', (data) => {
+        // data: { target: 'socket_id', payload: sdp }
+        io.to(data.target).emit('answer', data.payload);
+    });
+
+    socket.on('remote-candidate', (data) => {
+        io.to(data.target).emit('remote-candidate', data.payload);
+    });
+
+    // Targeted Commands (Remote -> Camera)
+    const cmds = ['start-recording', 'stop-recording', 'take-photo', 'switch-camera', 'switch-lens', 'control-camera', 'request-state', 'set-gain'];
+    cmds.forEach(cmd => {
+        socket.on(cmd, (data) => {
+            // Check if data has a 'target' field, otherwise broadcast (legacy support)
+            if (data && data.target) {
+                io.to(data.target).emit(cmd, data.payload);
+            } else {
+                io.to('camera').emit(cmd, data); // Legacy broadcast
+            }
+        });
+    });
+
+    // Feedback (Camera -> Remote)
+    // Wrap with ID so remote knows which camera sent it
+    socket.on('camera-state', (s) => io.to('remote').emit('camera-state', { from: socket.id, payload: s }));
+    socket.on('camera-devices', (d) => io.to('remote').emit('camera-devices', { from: socket.id, payload: d }));
+    socket.on('camera-capabilities', (c) => io.to('remote').emit('camera-capabilities', { from: socket.id, payload: c }));
+    socket.on('thermal-warning', (w) => io.to('remote').emit('thermal-warning', { from: socket.id, payload: w }));
     
     socket.on('log', (data) => {
         console.log(`[${data.source}] [${data.level}] ${data.message}`);
     });
 
-    socket.on('disconnect', () => console.log('[Server] Disconnected:', socket.id));
+    socket.on('disconnect', () => {
+        console.log('[Server] Disconnected:', socket.id);
+        if (socket.cameraMeta) {
+            io.to('remote').emit('camera-left', { id: socket.id });
+        }
+    });
 });
 
 // Start Server

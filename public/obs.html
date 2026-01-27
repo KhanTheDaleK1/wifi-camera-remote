@@ -3,55 +3,111 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>OBS Feed</title>
+    <title>OBS Multi-View</title>
     <style>
         body, html { margin: 0; padding: 0; background: #000; width: 100%; height: 100%; overflow: hidden; }
-        #remote-video { width: 100%; height: 100%; object-fit: contain; }
-        /* OBS-specific: Ensure transparent background if needed, though black is safer for video */
+        .grid { 
+            display: grid; 
+            grid-template-columns: repeat(auto-fit, minmax(50%, 1fr)); 
+            width: 100%; height: 100%; 
+        }
+        .cam-container { position: relative; width: 100%; height: 100%; border: 1px solid #333; }
+        video { width: 100%; height: 100%; object-fit: contain; }
+        .label { 
+            position: absolute; bottom: 10px; left: 10px; 
+            background: rgba(0,0,0,0.7); color: white; padding: 4px 8px; 
+            font-family: sans-serif; font-size: 14px; border-radius: 4px;
+        }
     </style>
 </head>
 <body>
-    <video id="remote-video" autoplay playsinline></video>
+    <div id="grid" class="grid"></div>
 
     <script src="https://cdn.socket.io/4.7.2/socket.io.min.js"></script>
     <script>
-        const socket = io({ 
-            transports: ['polling'],
-            reconnection: true
-        });
+        const socket = io({ transports: ['polling'], reconnection: true });
+        const grid = document.getElementById('grid');
+        const peers = {}; // { socketId: RTCPeerConnection }
 
-        const video = document.getElementById('remote-video');
-        video.muted = false; // Explicitly ensure audio is on
-        let peer;
-
-        // Auto-join on connect
         socket.on('connect', () => {
             console.log('Connected to server');
             socket.emit('join-remote');
-            // Request state to ensure camera knows we are here
-            socket.emit('request-state');
         });
 
-        // WebRTC Logic
-        socket.on('offer', async (o) => {
-            if (peer) peer.close();
-            peer = new RTCPeerConnection({ iceServers: [{ urls: 'stun:stun.l.google.com:19302' }] });
-            peer.ontrack = e => { 
-                console.log('Received track');
-                video.srcObject = e.streams[0]; 
-                video.play().catch(e => console.error('Auto-play failed:', e));
+        // --- Camera Management ---
+        function createVideoSlot(id, name) {
+            if (document.getElementById(`cam-${id}`)) return;
+
+            const div = document.createElement('div');
+            div.className = 'cam-container';
+            div.id = `cam-${id}`;
+            div.innerHTML = `
+                <video id="vid-${id}" autoplay playsinline></video>
+                <div class="label">${name || 'Camera ' + id.substr(0,4)}</div>
+            `;
+            grid.appendChild(div);
+            
+            // Adjust grid layout based on count
+            const count = grid.children.length;
+            grid.style.gridTemplateColumns = count > 1 ? '1fr 1fr' : '1fr';
+            grid.style.gridTemplateRows = count > 2 ? '1fr 1fr' : '1fr';
+        }
+
+        function removeVideoSlot(id) {
+            const el = document.getElementById(`cam-${id}`);
+            if (el) el.remove();
+            if (peers[id]) { peers[id].close(); delete peers[id]; }
+        }
+
+        socket.on('camera-list', (cameras) => {
+            cameras.forEach(c => createVideoSlot(c.id, c.meta.name));
+            // Trigger connection to all
+            socket.emit('request-state', { target: 'all' }); 
+        });
+
+        socket.on('camera-joined', (c) => {
+            createVideoSlot(c.id, c.meta.name);
+            socket.emit('request-state', { target: c.id });
+        });
+
+        socket.on('camera-left', (c) => removeVideoSlot(c.id));
+
+        // --- WebRTC Logic ---
+        socket.on('offer', async (data) => {
+            const id = data.from;
+            const offer = data.payload;
+
+            createVideoSlot(id, "Connecting..."); // Ensure slot exists
+            
+            if (peers[id]) peers[id].close();
+            
+            const p = new RTCPeerConnection({ iceServers: [{ urls: 'stun:stun.l.google.com:19302' }] });
+            peers[id] = p;
+
+            p.ontrack = e => { 
+                const v = document.getElementById(`vid-${id}`);
+                if (v) {
+                    v.srcObject = e.streams[0];
+                    v.muted = false; // Audio on
+                    v.play().catch(console.error);
+                }
             };
-            peer.onicecandidate = e => { if (e.candidate) socket.emit('remote-candidate', e.candidate); };
-            await peer.setRemoteDescription(new RTCSessionDescription(o));
-            const a = await peer.createAnswer();
-            await peer.setLocalDescription(a);
-            socket.emit('answer', a);
+
+            p.onicecandidate = e => { 
+                if (e.candidate) socket.emit('remote-candidate', { target: id, payload: e.candidate }); 
+            };
+
+            await p.setRemoteDescription(new RTCSessionDescription(offer));
+            const ans = await p.createAnswer();
+            await p.setLocalDescription(ans);
+            
+            socket.emit('answer', { target: id, payload: ans });
         });
 
-        socket.on('camera-candidate', c => peer && peer.addIceCandidate(new RTCIceCandidate(c)));
-        
-        // Auto-play reliability
-        video.onloadedmetadata = () => video.play();
+        socket.on('camera-candidate', (data) => {
+            if (peers[data.from]) peers[data.from].addIceCandidate(new RTCIceCandidate(data.payload));
+        });
+
     </script>
 </body>
 </html>

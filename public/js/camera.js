@@ -23,13 +23,29 @@ let state = 'IDLE';
 let currentSettings = {
     deviceId: null,
     resolution: 1080,
-    fps: 30
+    fps: 30,
+    recordingBitrate: 250000000 // Default to Extreme (250 Mbps)
 };
+
+// --- Wake Lock ---
+let wakeLock = null;
+async function requestWakeLock() {
+    try {
+        wakeLock = await navigator.wakeLock.request('screen');
+        console.log('Screen Wake Lock active');
+        wakeLock.addEventListener('release', () => console.log('Wake Lock released'));
+    } catch (err) {
+        console.warn(`${err.name}, ${err.message}`);
+    }
+}
 
 // --- Connection Recovery ---
 socket.on('connect', () => {
     console.log('Socket Connected');
-    socket.emit('join-camera');
+    // Register with some metadata (Name/UserAgent)
+    const deviceName = navigator.userAgent.match(/\(([^)]+)\)/)[1] || 'Mobile Device';
+    socket.emit('join-camera', { name: deviceName });
+    
     if (stream) {
         initRTC();
         socket.emit('camera-state', state === 'RECORDING' ? 'recording' : 'idle');
@@ -38,7 +54,18 @@ socket.on('connect', () => {
 
 els.btn.onclick = async () => {
     try {
-        noSleep.enable();
+        // Try native Wake Lock first, fall back to NoSleep
+        if ('wakeLock' in navigator) {
+            await requestWakeLock();
+            document.addEventListener('visibilitychange', async () => {
+                if (wakeLock !== null && document.visibilityState === 'visible') {
+                    await requestWakeLock();
+                }
+            });
+        } else {
+            noSleep.enable();
+        }
+        
         await startCamera();
         els.start.classList.add('hidden');
         els.overlay.classList.remove('hidden');
@@ -48,6 +75,20 @@ els.btn.onclick = async () => {
 async function startCamera(updates = {}) {
     Object.assign(currentSettings, updates);
     
+    // Auto-tuning on first run if no specific updates are passed
+    if (Object.keys(updates).length === 0 && typeof DeviceTuner !== 'undefined') {
+        try {
+            const tuned = await DeviceTuner.getOptimizedConstraints();
+            console.log("Applying Tuned Profile:", tuned);
+            if (!currentSettings.resolution) currentSettings.resolution = tuned.height;
+            if (!currentSettings.fps) currentSettings.fps = tuned.frameRate;
+            // Note: We keep recordingBitrate high (250M) for local recording, 
+            // the tuner bitrate is mainly for the WebRTC stream if we were setting sender parameters.
+        } catch (e) {
+            console.warn("Tuner failed, using defaults", e);
+        }
+    }
+
     console.log('Applying Settings:', currentSettings);
 
     if (stream) stream.getTracks().forEach(t => t.stop());
@@ -97,8 +138,28 @@ function initRTC() {
     // Standard Audio/Video Track Addition (Original Behavior)
     stream.getTracks().forEach(t => peer.addTrack(t, stream));
 
+    peer.oniceconnectionstatechange = () => {
+        console.log('ICE Connection State:', peer.iceConnectionState);
+        if (peer.iceConnectionState === 'disconnected' || peer.iceConnectionState === 'failed') {
+            console.warn('ICE Connection failed/disconnected. Possible network issue.');
+            // Phase 1: Automated restart could go here, but logging is safe step 1.
+        }
+    };
+
     peer.onicecandidate = e => { if (e.candidate) socket.emit('camera-candidate', e.candidate); };
     peer.createOffer().then(o => peer.setLocalDescription(o)).then(() => socket.emit('offer', peer.localDescription));
+
+    // Monitor performance
+    const sender = peer.getSenders().find(s => s.track && s.track.kind === 'video');
+    if (sender && typeof DeviceTuner !== 'undefined') {
+        DeviceTuner.startPerformanceMonitor(peer, sender, (action) => {
+            if (action === 'downgrade') {
+                console.log("Downgrading quality due to thermal/performance load");
+                startCamera({ resolution: 720, fps: 30 }); // Drop to safe baseline
+                socket.emit('log', { source: 'Camera', level: 'WARN', message: 'Thermal throttling detected. Downgraded to 720p30.' });
+            }
+        });
+    }
 }
 
 // socket.on('set-gain') removed effectively by reverting logic
@@ -133,6 +194,12 @@ socket.on('control-camera', async (c) => {
             fps: c.frameRate || currentSettings.fps 
         });
         return;
+    }
+
+    // Update Recording Bitrate
+    if (c.bitrate) {
+        currentSettings.recordingBitrate = c.bitrate;
+        console.log(`Bitrate set to: ${c.bitrate / 1000000} Mbps`);
     }
 
     try {
@@ -181,7 +248,7 @@ socket.on('start-recording', () => {
     // Maximize bitrate for "absolute best" quality (250 Mbps)
     const options = {
         mimeType: mime,
-        videoBitsPerSecond: 250000000, 
+        videoBitsPerSecond: currentSettings.recordingBitrate, 
         audioBitsPerSecond: 320000 // 320 kbps for high fidelity audio
     };
 

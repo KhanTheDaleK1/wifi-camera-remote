@@ -3,46 +3,30 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>OBS Control Dock</title>
+    <title>Studio Controller</title>
     <style>
-        body { 
-            background: #1a1a1a; 
-            color: #ddd; 
-            font-family: sans-serif; 
-            margin: 0; 
-            padding: 10px;
-            font-size: 12px;
-        }
+        body { background: #1a1a1a; color: #ddd; font-family: sans-serif; margin: 0; padding: 10px; font-size: 12px; }
         .panel { display: flex; flex-direction: column; gap: 8px; }
         .row { display: flex; align-items: center; gap: 8px; }
         label { width: 40px; }
-        select, button { 
-            background: #333; 
-            color: white; 
-            border: 1px solid #444; 
-            padding: 4px; 
-            border-radius: 4px;
-            flex-grow: 1;
-        }
+        select, button { background: #333; color: white; border: 1px solid #444; padding: 4px; border-radius: 4px; flex-grow: 1; }
         input[type=range] { flex-grow: 1; accent-color: #0a84ff; }
         button:hover { background: #444; }
         button.active { background: #0a84ff; border-color: #0060df; }
         button.rec { background: #cc0000; border-color: #aa0000; color: white; font-weight: bold; }
         button.rec.recording { background: #ff0000; animation: pulse 2s infinite; }
-        
         @keyframes pulse { 0% { opacity: 1; } 50% { opacity: 0.7; } 100% { opacity: 1; } }
-        
-        .status-bar { 
-            display: flex; justify-content: space-between; 
-            background: #000; padding: 5px; border-radius: 4px; margin-bottom: 5px;
-        }
+        .status-bar { display: flex; justify-content: space-between; background: #000; padding: 5px; border-radius: 4px; margin-bottom: 5px; }
         .status-ind { width: 10px; height: 10px; border-radius: 50%; background: #444; display: inline-block; }
         .status-ind.connected { background: #00cc00; }
+        #cam-select { background: #000; border: 1px solid #0a84ff; color: #fff; font-weight: bold; }
     </style>
 </head>
 <body>
     <div class="status-bar">
-        <span id="conn-status" style="color: #888;">Connecting...</span>
+        <select id="cam-select">
+            <option value="">Searching for cameras...</option>
+        </select>
         <div id="conn-ind" class="status-ind"></div>
     </div>
 
@@ -53,9 +37,7 @@
         </div>
 
         <div class="row">
-            <select id="lens-select">
-                <option value="">Lenses...</option>
-            </select>
+            <select id="lens-select"><option value="">Lenses...</option></select>
             <button id="torch-btn" style="flex-grow: 0; width: 30px;">⚡</button>
         </div>
 
@@ -87,6 +69,12 @@
                 <option value="60">60 fps</option>
                 <option value="24">24 fps</option>
             </select>
+            <select id="bitrate-select">
+                <option value="250000000" selected>250M</option>
+                <option value="100000000">100M</option>
+                <option value="50000000">50M</option>
+                <option value="15000000">15M</option>
+            </select>
         </div>
     </div>
 
@@ -95,8 +83,8 @@
         const socket = io({ transports: ['polling'] });
         
         const els = {
-            connStatus: document.getElementById('conn-status'),
             connInd: document.getElementById('conn-ind'),
+            camSelect: document.getElementById('cam-select'),
             recBtn: document.getElementById('rec-btn'),
             photoBtn: document.getElementById('photo-btn'),
             lens: document.getElementById('lens-select'),
@@ -108,41 +96,75 @@
             gain: document.getElementById('gain-slider'),
             gainVal: document.getElementById('gain-val'),
             res: document.getElementById('res-select'),
-            fps: document.getElementById('fps-select')
+            fps: document.getElementById('fps-select'),
+            bitrate: document.getElementById('bitrate-select')
         };
 
         let recording = false;
         let torchState = false;
+        let activeCamId = null;
 
-        // Connection
+        // --- Connection ---
         socket.on('connect', () => {
-            els.connStatus.innerText = "Online";
             els.connInd.classList.add('connected');
             socket.emit('join-remote');
-            
-            // Wait slightly to ensure join is processed
-            setTimeout(() => {
-                socket.emit('request-state'); 
-            }, 500);
         });
 
-        socket.on('disconnect', () => {
-            els.connStatus.innerText = "Offline";
-            els.connInd.classList.remove('connected');
-        });
+        socket.on('disconnect', () => els.connInd.classList.remove('connected'));
 
-        // State Updates
-        socket.on('camera-state', (s) => {
-            recording = (s === 'recording');
+        // --- Camera Management ---
+        function updateCamList(cameras) {
+            const savedId = activeCamId;
+            els.camSelect.innerHTML = cameras.map(c => `<option value="${c.id}">${c.meta.name || c.id.substr(0,4)}</option>`).join('');
+            if (cameras.length > 0) {
+                // Try to restore selection or pick first
+                if (savedId && cameras.find(c => c.id === savedId)) {
+                    els.camSelect.value = savedId;
+                } else {
+                    activeCamId = cameras[0].id;
+                    els.camSelect.value = activeCamId;
+                    requestActiveState();
+                }
+            } else {
+                els.camSelect.innerHTML = '<option>No Cameras</option>';
+            }
+        }
+
+        socket.on('camera-list', (cams) => updateCamList(cams));
+        socket.on('camera-joined', () => socket.emit('join-remote')); // Refresh list
+        socket.on('camera-left', () => socket.emit('join-remote'));
+
+        els.camSelect.onchange = () => {
+            activeCamId = els.camSelect.value;
+            requestActiveState();
+        };
+
+        function requestActiveState() {
+            if (!activeCamId) return;
+            socket.emit('request-state', { target: activeCamId });
+        }
+
+        function sendCmd(cmd, payload = {}) {
+            if (!activeCamId) return;
+            socket.emit(cmd, { target: activeCamId, payload });
+        }
+
+        // --- State Feedback ---
+        socket.on('camera-state', (d) => {
+            if (d.from !== activeCamId) return;
+            recording = (d.payload === 'recording');
             els.recBtn.classList.toggle('recording', recording);
             els.recBtn.innerText = recording ? "STOP" : "RECORD";
         });
 
-        socket.on('camera-devices', (devs) => {
-            els.lens.innerHTML = devs.map(d => `<option value="${d.deviceId}">${d.label || 'Lens ' + d.deviceId.slice(0,4)}</option>`).join('');
+        socket.on('camera-devices', (d) => {
+            if (d.from !== activeCamId) return;
+            els.lens.innerHTML = d.payload.map(x => `<option value="${x.deviceId}">${x.label || 'Lens'}</option>`).join('');
         });
 
-        socket.on('camera-capabilities', (caps) => {
+        socket.on('camera-capabilities', (d) => {
+            if (d.from !== activeCamId) return;
+            const caps = d.payload;
             if (caps.zoom) {
                 els.zoom.min = caps.zoom.min;
                 els.zoom.max = caps.zoom.max;
@@ -150,38 +172,34 @@
             }
         });
 
-        // Controls
-        els.recBtn.onclick = () => socket.emit(recording ? 'stop-recording' : 'start-recording');
-        els.photoBtn.onclick = () => socket.emit('take-photo');
+        // --- Controls ---
+        els.recBtn.onclick = () => sendCmd(recording ? 'stop-recording' : 'start-recording');
+        els.photoBtn.onclick = () => sendCmd('take-photo');
         
-        els.lens.onchange = () => socket.emit('switch-lens', els.lens.value);
+        els.lens.onchange = () => sendCmd('switch-lens', els.lens.value);
         
         els.torch.onclick = () => {
             torchState = !torchState;
             els.torch.classList.toggle('active', torchState);
-            socket.emit('control-camera', { torch: torchState });
+            sendCmd('control-camera', { torch: torchState });
         };
 
         els.zoom.oninput = () => {
             els.zoomVal.innerText = parseFloat(els.zoom.value).toFixed(1);
-            socket.emit('control-camera', { zoom: parseFloat(els.zoom.value) });
+            sendCmd('control-camera', { zoom: parseFloat(els.zoom.value) });
         };
 
-        els.focus.oninput = () => socket.emit('control-camera', { focusDistance: parseFloat(els.focus.value) });
-        
-        // Simple "AF" trigger (reset focus mode if API allows, or just ignore manual)
-        els.af.onclick = () => {
-             // Re-apply constraints without focusDistance to trigger auto focus
-             socket.emit('control-camera', { focusMode: 'continuous' });
-        };
+        els.focus.oninput = () => sendCmd('control-camera', { focusDistance: parseFloat(els.focus.value) });
+        els.af.onclick = () => sendCmd('control-camera', { focusMode: 'continuous' });
 
         els.gain.oninput = () => {
             els.gainVal.innerText = parseFloat(els.gain.value).toFixed(1);
-            socket.emit('set-gain', els.gain.value);
+            sendCmd('set-gain', els.gain.value);
         };
 
-        els.res.onchange = () => socket.emit('control-camera', { resolution: parseInt(els.res.value) });
-        els.fps.onchange = () => socket.emit('control-camera', { frameRate: parseInt(els.fps.value) });
+        els.res.onchange = () => sendCmd('control-camera', { resolution: parseInt(els.res.value) });
+        els.fps.onchange = () => sendCmd('control-camera', { frameRate: parseInt(els.fps.value) });
+        els.bitrate.onchange = () => sendCmd('control-camera', { bitrate: parseInt(els.bitrate.value) });
 
     </script>
 </body>
