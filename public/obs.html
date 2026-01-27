@@ -1,0 +1,56 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>OBS Feed</title>
+    <style>
+        body, html { margin: 0; padding: 0; background: #000; width: 100%; height: 100%; overflow: hidden; }
+        #remote-video { width: 100%; height: 100%; object-fit: contain; }
+        /* OBS-specific: Ensure transparent background if needed, though black is safer for video */
+    </style>
+</head>
+<body>
+    <video id="remote-video" autoplay playsinline muted></video>
+
+    <script src="https://cdn.socket.io/4.7.2/socket.io.min.js"></script>
+    <script>
+        const socket = io({ 
+            transports: ['polling'],
+            reconnection: true
+        });
+
+        const video = document.getElementById('remote-video');
+        let peer;
+
+        // Auto-join on connect
+        socket.on('connect', () => {
+            console.log('Connected to server');
+            socket.emit('join-remote');
+            // Request state to ensure camera knows we are here
+            socket.emit('request-state');
+        });
+
+        // WebRTC Logic
+        socket.on('offer', async (o) => {
+            if (peer) peer.close();
+            peer = new RTCPeerConnection({ iceServers: [{ urls: 'stun:stun.l.google.com:19302' }] });
+            peer.ontrack = e => { 
+                console.log('Received track');
+                video.srcObject = e.streams[0]; 
+                video.play().catch(e => console.error('Auto-play failed:', e));
+            };
+            peer.onicecandidate = e => { if (e.candidate) socket.emit('remote-candidate', e.candidate); };
+            await peer.setRemoteDescription(new RTCSessionDescription(o));
+            const a = await peer.createAnswer();
+            await peer.setLocalDescription(a);
+            socket.emit('answer', a);
+        });
+
+        socket.on('camera-candidate', c => peer && peer.addIceCandidate(new RTCIceCandidate(c)));
+        
+        // Auto-play reliability
+        video.onloadedmetadata = () => video.play();
+    </script>
+</body>
+</html>

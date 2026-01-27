@@ -6,7 +6,7 @@ const ip = require('ip');
 const path = require('path');
 const QRCode = require('qrcode');
 
-const PORT = 3000;
+const PORT = 3001;
 const app = express();
 const server = https.createServer({
   key: fs.readFileSync('key.pem'),
@@ -22,7 +22,8 @@ app.use(express.static(path.join(__dirname, 'public')));
 app.use('/node_modules', express.static(path.join(__dirname, 'node_modules')));
 
 app.get('/network-info', async (req, res) => {
-    const url = `https://${ip.address()}:${PORT}/camera.html`;
+    const HOST_IP = process.env.HOST_IP || ip.address();
+    const url = `https://${HOST_IP}:${PORT}/camera.html`;
     try {
         const qr = await QRCode.toDataURL(url);
         res.json({ url, qr });
@@ -61,6 +62,8 @@ io.on('connection', (socket) => {
     socket.on('disconnect', () => console.log('[Server] Disconnected:', socket.id));
 });
 
+const HOST_IP = process.env.HOST_IP || ip.address();
 server.listen(PORT, '0.0.0.0', () => {
-    console.log(`Server running at https://${ip.address()}:${PORT}`);
+    console.log(`Server running at https://${HOST_IP}:${PORT}`);
+    console.log(`OBS Feed: https://${HOST_IP}:${PORT}/obs.html`);
 });

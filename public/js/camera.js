@@ -146,12 +146,38 @@ function triggerDownload(blob, filename) {
 
 socket.on('start-recording', () => {
     chunks = [];
-    const mime = MediaRecorder.isTypeSupported('video/mp4') ? 'video/mp4' : 'video/webm';
-    recorder = new MediaRecorder(stream, { mimeType: mime });
+    
+    // Find best supported mimeType
+    const types = [
+        "video/mp4;codecs=avc1", 
+        "video/mp4",
+        "video/webm;codecs=vp9", 
+        "video/webm;codecs=vp8", 
+        "video/webm"
+    ];
+    const mime = types.find(t => MediaRecorder.isTypeSupported(t)) || 'video/webm';
+    console.log(`Using mimeType: ${mime}`);
+
+    // Maximize bitrate for "absolute best" quality (250 Mbps)
+    const options = {
+        mimeType: mime,
+        videoBitsPerSecond: 250000000, 
+        audioBitsPerSecond: 128000
+    };
+
+    try {
+        recorder = new MediaRecorder(stream, options);
+    } catch (e) {
+        console.warn('High bitrate failed, falling back to default options', e);
+        recorder = new MediaRecorder(stream, { mimeType: mime });
+    }
+
     recorder.ondataavailable = e => chunks.push(e.data);
     recorder.onstop = () => {
         state = 'IDLE';
-        triggerDownload(new Blob(chunks, { type: mime }), `vid_${Date.now()}.mp4`);
+        // Ensure extension matches container
+        const ext = mime.includes('mp4') ? 'mp4' : 'webm';
+        triggerDownload(new Blob(chunks, { type: mime }), `vid_${Date.now()}.${ext}`);
     };
     recorder.start();
     state = 'RECORDING';
