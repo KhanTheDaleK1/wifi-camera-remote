@@ -1,14 +1,21 @@
 {
-  "name": "8_wifi-camera-remote",
+  "name": "wifi-camera-remote",
   "version": "1.0.0",
-  "description": "",
-  "main": "index.js",
+  "description": "Turn your smartphone into a high-quality, wireless webcam with professional controls and OBS integration.",
+  "main": "src/index.js",
   "scripts": {
+    "start": "node src/index.js",
     "test": "echo \"Error: no test specified\" && exit 1"
   },
-  "keywords": [],
-  "author": "",
-  "license": "ISC",
+  "keywords": [
+    "camera",
+    "remote",
+    "obs",
+    "webrtc",
+    "asmr"
+  ],
+  "author": "Open Source",
+  "license": "MIT",
   "type": "commonjs",
   "dependencies": {
     "express": "^4.21.2",

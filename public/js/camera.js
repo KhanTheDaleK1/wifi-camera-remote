@@ -53,12 +53,7 @@ async function startCamera(updates = {}) {
     if (stream) stream.getTracks().forEach(t => t.stop());
 
     const constraints = {
-        audio: {
-            echoCancellation: false,
-            noiseSuppression: false,
-            autoGainControl: false,
-            channelCount: 2
-        },
+        audio: true, // Revert to standard processing (EC, NS, AGC enabled)
         video: { 
             facingMode: currentSettings.deviceId ? undefined : 'environment',
             deviceId: currentSettings.deviceId ? { exact: currentSettings.deviceId } : undefined,
@@ -74,8 +69,13 @@ async function startCamera(updates = {}) {
         track = stream.getVideoTracks()[0];
         
         const devs = await navigator.mediaDevices.enumerateDevices();
-        socket.emit('camera-devices', devs.filter(d => d.kind === 'videoinput'));
-        if (track.getCapabilities) socket.emit('camera-capabilities', track.getCapabilities());
+        const videoInputs = devs.filter(d => d.kind === 'videoinput');
+        socket.emit('camera-devices', videoInputs); // This goes to server -> remote room
+        
+        if (track.getCapabilities) {
+            const caps = track.getCapabilities();
+            socket.emit('camera-capabilities', caps); // This goes to server -> remote room
+        }
         
         initRTC();
     } catch (e) {
@@ -94,44 +94,29 @@ function initRTC() {
     if (peer) peer.close();
     peer = new RTCPeerConnection({ iceServers: [{ urls: 'stun:stun.l.google.com:19302' }] });
 
-    // --- Audio Processing (Gain Control) ---
-    if (!audioCtx) {
-        audioCtx = new (window.AudioContext || window.webkitAudioContext)();
-        gainNode = audioCtx.createGain();
-        gainNode.gain.value = 0.5; // Default to 50% gain to fix "too high" levels
-        dest = audioCtx.createMediaStreamDestination();
-    }
-
-    if (stream.getAudioTracks().length > 0) {
-        const source = audioCtx.createMediaStreamSource(stream);
-        source.connect(gainNode);
-        gainNode.connect(dest);
-        
-        // Add processed audio track
-        dest.stream.getAudioTracks().forEach(t => peer.addTrack(t, dest.stream));
-    }
-
-    // Add video track directly
-    stream.getVideoTracks().forEach(t => peer.addTrack(t, stream));
+    // Standard Audio/Video Track Addition (Original Behavior)
+    stream.getTracks().forEach(t => peer.addTrack(t, stream));
 
     peer.onicecandidate = e => { if (e.candidate) socket.emit('camera-candidate', e.candidate); };
     peer.createOffer().then(o => peer.setLocalDescription(o)).then(() => socket.emit('offer', peer.localDescription));
 }
 
-socket.on('set-gain', (val) => {
-    if (gainNode) {
-        const v = parseFloat(val);
-        gainNode.gain.value = v;
-        console.log('Audio Gain set to:', v);
-    }
-});
+// socket.on('set-gain') removed effectively by reverting logic
+socket.on('set-gain', () => {}); // Keep empty listener to prevent socket errors from UI
 
 socket.on('answer', a => peer && peer.setRemoteDescription(new RTCSessionDescription(a)));
 socket.on('remote-candidate', c => peer && peer.addIceCandidate(new RTCIceCandidate(c)));
-socket.on('request-state', () => { 
+socket.on('request-state', async () => { 
     if(stream) {
-        initRTC();
+        // Do NOT restart RTC (initRTC) here, it breaks the stream for existing viewers
         socket.emit('camera-state', state === 'RECORDING' ? 'recording' : 'idle');
+        
+        // Re-broadcast devices and capabilities for new remotes
+        const devs = await navigator.mediaDevices.enumerateDevices();
+        socket.emit('camera-devices', devs.filter(d => d.kind === 'videoinput'));
+        if (track && track.getCapabilities) {
+            socket.emit('camera-capabilities', track.getCapabilities());
+        }
     }
 });
 

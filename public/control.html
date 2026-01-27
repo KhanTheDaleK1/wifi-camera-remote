@@ -72,8 +72,8 @@
         </div>
         <div class="row">
             <label>Gain</label>
-            <input type="range" id="gain-slider" min="0" max="2" step="0.1" value="0.5">
-            <span id="gain-val" style="width: 25px; text-align: right;">0.5</span>
+            <input type="range" id="gain-slider" min="0" max="1" step="0.01" value="0.1">
+            <span id="gain-val" style="width: 25px; text-align: right;">0.1</span>
         </div>
 
         <div class="row">
@@ -119,7 +119,11 @@
             els.connStatus.innerText = "Online";
             els.connInd.classList.add('connected');
             socket.emit('join-remote');
-            socket.emit('request-state');
+            
+            // Wait slightly to ensure join is processed
+            setTimeout(() => {
+                socket.emit('request-state'); 
+            }, 500);
         });
 
         socket.on('disconnect', () => {

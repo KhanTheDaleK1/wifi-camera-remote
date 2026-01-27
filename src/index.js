@@ -1,21 +1,22 @@
 const fs = require('fs');
-fs.writeFileSync('debug_start.log', 'Starting server...\n');
+const path = require('path');
 const express = require('express');
 const https = require('https');
+const http = require('http');
 const socketIo = require('socket.io');
 const ip = require('ip');
-const path = require('path');
 const QRCode = require('qrcode');
-
-const http = require('http');
 
 const PORT = 3001;
 const HTTP_PORT = 3002;
 const app = express();
 
+// Path to project root
+const rootDir = path.join(__dirname, '..');
+
 const server = https.createServer({
-  key: fs.readFileSync('key.pem'),
-  cert: fs.readFileSync('cert.pem')
+  key: fs.readFileSync(path.join(rootDir, 'certs', 'key.pem')),
+  cert: fs.readFileSync(path.join(rootDir, 'certs', 'cert.pem'))
 }, app);
 
 const httpServer = http.createServer(app);
@@ -26,8 +27,8 @@ const io = socketIo(server, {
 });
 io.attach(httpServer);
 
-app.use(express.static(path.join(__dirname, 'public')));
-app.use('/node_modules', express.static(path.join(__dirname, 'node_modules')));
+app.use(express.static(path.join(rootDir, 'public')));
+app.use('/node_modules', express.static(path.join(rootDir, 'node_modules')));
 
 app.use(function(req, res, next) {
     res.header("Access-Control-Allow-Origin", "*");
@@ -76,19 +77,15 @@ io.on('connection', (socket) => {
     socket.on('disconnect', () => console.log('[Server] Disconnected:', socket.id));
 });
 
-// ... existing imports ...
+// Start Server
+const HOST_IP = process.env.HOST_IP || ip.address();
 
-try {
-    const HOST_IP = process.env.HOST_IP || ip.address();
-    server.listen(PORT, '0.0.0.0', () => {
-        console.log(`HTTPS Server running at https://${HOST_IP}:${PORT}`);
-    });
+server.listen(PORT, '0.0.0.0', () => {
+    console.log(`HTTPS Server running at https://${HOST_IP}:${PORT}`);
+});
 
-    httpServer.listen(HTTP_PORT, '0.0.0.0', () => {
-        console.log(`HTTP Server running at http://${HOST_IP}:${HTTP_PORT}`);
-        console.log(`OBS Feed (HTTP): http://${HOST_IP}:${HTTP_PORT}/obs.html`);
-        console.log(`OBS Dock (HTTP): http://${HOST_IP}:${HTTP_PORT}/control.html`);
-    });
-} catch (e) {
-    fs.writeFileSync('startup_error.log', e.toString());
-}
+httpServer.listen(HTTP_PORT, '0.0.0.0', () => {
+    console.log(`HTTP Server running at http://${HOST_IP}:${HTTP_PORT}`);
+    console.log(`OBS Feed (HTTP): http://${HOST_IP}:${HTTP_PORT}/obs.html`);
+    console.log(`OBS Dock (HTTP): http://${HOST_IP}:${HTTP_PORT}/control.html`);
+});
