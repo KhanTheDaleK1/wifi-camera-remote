@@ -11,7 +11,7 @@
     </style>
 </head>
 <body>
-    <video id="remote-video" autoplay playsinline muted></video>
+    <video id="remote-video" autoplay playsinline></video>
 
     <script src="https://cdn.socket.io/4.7.2/socket.io.min.js"></script>
     <script>
@@ -21,6 +21,7 @@
         });
 
         const video = document.getElementById('remote-video');
+        video.muted = false; // Explicitly ensure audio is on
         let peer;
 
         // Auto-join on connect

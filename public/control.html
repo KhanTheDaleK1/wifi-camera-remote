@@ -1,0 +1,184 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>OBS Control Dock</title>
+    <style>
+        body { 
+            background: #1a1a1a; 
+            color: #ddd; 
+            font-family: sans-serif; 
+            margin: 0; 
+            padding: 10px;
+            font-size: 12px;
+        }
+        .panel { display: flex; flex-direction: column; gap: 8px; }
+        .row { display: flex; align-items: center; gap: 8px; }
+        label { width: 40px; }
+        select, button { 
+            background: #333; 
+            color: white; 
+            border: 1px solid #444; 
+            padding: 4px; 
+            border-radius: 4px;
+            flex-grow: 1;
+        }
+        input[type=range] { flex-grow: 1; accent-color: #0a84ff; }
+        button:hover { background: #444; }
+        button.active { background: #0a84ff; border-color: #0060df; }
+        button.rec { background: #cc0000; border-color: #aa0000; color: white; font-weight: bold; }
+        button.rec.recording { background: #ff0000; animation: pulse 2s infinite; }
+        
+        @keyframes pulse { 0% { opacity: 1; } 50% { opacity: 0.7; } 100% { opacity: 1; } }
+        
+        .status-bar { 
+            display: flex; justify-content: space-between; 
+            background: #000; padding: 5px; border-radius: 4px; margin-bottom: 5px;
+        }
+        .status-ind { width: 10px; height: 10px; border-radius: 50%; background: #444; display: inline-block; }
+        .status-ind.connected { background: #00cc00; }
+    </style>
+</head>
+<body>
+    <div class="status-bar">
+        <span id="conn-status" style="color: #888;">Connecting...</span>
+        <div id="conn-ind" class="status-ind"></div>
+    </div>
+
+    <div class="panel">
+        <div class="row">
+            <button id="rec-btn" class="rec">RECORD</button>
+            <button id="photo-btn">SNAP</button>
+        </div>
+
+        <div class="row">
+            <select id="lens-select">
+                <option value="">Lenses...</option>
+            </select>
+            <button id="torch-btn" style="flex-grow: 0; width: 30px;">⚡</button>
+        </div>
+
+        <div class="row">
+            <label>Zoom</label>
+            <input type="range" id="zoom-slider" min="1" max="10" step="0.1" value="1">
+            <span id="zoom-val" style="width: 25px; text-align: right;">1.0</span>
+        </div>
+
+        <div class="row">
+            <label>Focus</label>
+            <input type="range" id="focus-slider" min="0" max="1" step="0.01" value="0.5">
+            <button id="auto-focus-btn" style="flex-grow:0; font-size:10px;">AF</button>
+        </div>
+        <div class="row">
+            <label>Gain</label>
+            <input type="range" id="gain-slider" min="0" max="2" step="0.1" value="0.5">
+            <span id="gain-val" style="width: 25px; text-align: right;">0.5</span>
+        </div>
+
+        <div class="row">
+             <select id="res-select">
+                <option value="1080" selected>1080p</option>
+                <option value="2160">4K</option>
+                <option value="720">720p</option>
+            </select>
+            <select id="fps-select">
+                <option value="30" selected>30 fps</option>
+                <option value="60">60 fps</option>
+                <option value="24">24 fps</option>
+            </select>
+        </div>
+    </div>
+
+    <script src="https://cdn.socket.io/4.7.2/socket.io.min.js"></script>
+    <script>
+        const socket = io({ transports: ['polling'] });
+        
+        const els = {
+            connStatus: document.getElementById('conn-status'),
+            connInd: document.getElementById('conn-ind'),
+            recBtn: document.getElementById('rec-btn'),
+            photoBtn: document.getElementById('photo-btn'),
+            lens: document.getElementById('lens-select'),
+            torch: document.getElementById('torch-btn'),
+            zoom: document.getElementById('zoom-slider'),
+            zoomVal: document.getElementById('zoom-val'),
+            focus: document.getElementById('focus-slider'),
+            af: document.getElementById('auto-focus-btn'),
+            gain: document.getElementById('gain-slider'),
+            gainVal: document.getElementById('gain-val'),
+            res: document.getElementById('res-select'),
+            fps: document.getElementById('fps-select')
+        };
+
+        let recording = false;
+        let torchState = false;
+
+        // Connection
+        socket.on('connect', () => {
+            els.connStatus.innerText = "Online";
+            els.connInd.classList.add('connected');
+            socket.emit('join-remote');
+            socket.emit('request-state');
+        });
+
+        socket.on('disconnect', () => {
+            els.connStatus.innerText = "Offline";
+            els.connInd.classList.remove('connected');
+        });
+
+        // State Updates
+        socket.on('camera-state', (s) => {
+            recording = (s === 'recording');
+            els.recBtn.classList.toggle('recording', recording);
+            els.recBtn.innerText = recording ? "STOP" : "RECORD";
+        });
+
+        socket.on('camera-devices', (devs) => {
+            els.lens.innerHTML = devs.map(d => `<option value="${d.deviceId}">${d.label || 'Lens ' + d.deviceId.slice(0,4)}</option>`).join('');
+        });
+
+        socket.on('camera-capabilities', (caps) => {
+            if (caps.zoom) {
+                els.zoom.min = caps.zoom.min;
+                els.zoom.max = caps.zoom.max;
+                els.zoom.step = caps.zoom.step;
+            }
+        });
+
+        // Controls
+        els.recBtn.onclick = () => socket.emit(recording ? 'stop-recording' : 'start-recording');
+        els.photoBtn.onclick = () => socket.emit('take-photo');
+        
+        els.lens.onchange = () => socket.emit('switch-lens', els.lens.value);
+        
+        els.torch.onclick = () => {
+            torchState = !torchState;
+            els.torch.classList.toggle('active', torchState);
+            socket.emit('control-camera', { torch: torchState });
+        };
+
+        els.zoom.oninput = () => {
+            els.zoomVal.innerText = parseFloat(els.zoom.value).toFixed(1);
+            socket.emit('control-camera', { zoom: parseFloat(els.zoom.value) });
+        };
+
+        els.focus.oninput = () => socket.emit('control-camera', { focusDistance: parseFloat(els.focus.value) });
+        
+        // Simple "AF" trigger (reset focus mode if API allows, or just ignore manual)
+        els.af.onclick = () => {
+             // Re-apply constraints without focusDistance to trigger auto focus
+             socket.emit('control-camera', { focusMode: 'continuous' });
+        };
+
+        els.gain.oninput = () => {
+            els.gainVal.innerText = parseFloat(els.gain.value).toFixed(1);
+            socket.emit('set-gain', els.gain.value);
+        };
+
+        els.res.onchange = () => socket.emit('control-camera', { resolution: parseInt(els.res.value) });
+        els.fps.onchange = () => socket.emit('control-camera', { frameRate: parseInt(els.fps.value) });
+
+    </script>
+</body>
+</html>

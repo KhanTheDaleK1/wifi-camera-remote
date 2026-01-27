@@ -53,7 +53,12 @@ async function startCamera(updates = {}) {
     if (stream) stream.getTracks().forEach(t => t.stop());
 
     const constraints = {
-        audio: true,
+        audio: {
+            echoCancellation: false,
+            noiseSuppression: false,
+            autoGainControl: false,
+            channelCount: 2
+        },
         video: { 
             facingMode: currentSettings.deviceId ? undefined : 'environment',
             deviceId: currentSettings.deviceId ? { exact: currentSettings.deviceId } : undefined,
@@ -83,13 +88,43 @@ async function startCamera(updates = {}) {
     }
 }
 
+let audioCtx, gainNode, dest;
+
 function initRTC() {
     if (peer) peer.close();
     peer = new RTCPeerConnection({ iceServers: [{ urls: 'stun:stun.l.google.com:19302' }] });
-    stream.getTracks().forEach(t => peer.addTrack(t, stream));
+
+    // --- Audio Processing (Gain Control) ---
+    if (!audioCtx) {
+        audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+        gainNode = audioCtx.createGain();
+        gainNode.gain.value = 0.5; // Default to 50% gain to fix "too high" levels
+        dest = audioCtx.createMediaStreamDestination();
+    }
+
+    if (stream.getAudioTracks().length > 0) {
+        const source = audioCtx.createMediaStreamSource(stream);
+        source.connect(gainNode);
+        gainNode.connect(dest);
+        
+        // Add processed audio track
+        dest.stream.getAudioTracks().forEach(t => peer.addTrack(t, dest.stream));
+    }
+
+    // Add video track directly
+    stream.getVideoTracks().forEach(t => peer.addTrack(t, stream));
+
     peer.onicecandidate = e => { if (e.candidate) socket.emit('camera-candidate', e.candidate); };
     peer.createOffer().then(o => peer.setLocalDescription(o)).then(() => socket.emit('offer', peer.localDescription));
 }
+
+socket.on('set-gain', (val) => {
+    if (gainNode) {
+        const v = parseFloat(val);
+        gainNode.gain.value = v;
+        console.log('Audio Gain set to:', v);
+    }
+});
 
 socket.on('answer', a => peer && peer.setRemoteDescription(new RTCSessionDescription(a)));
 socket.on('remote-candidate', c => peer && peer.addIceCandidate(new RTCIceCandidate(c)));
@@ -162,7 +197,7 @@ socket.on('start-recording', () => {
     const options = {
         mimeType: mime,
         videoBitsPerSecond: 250000000, 
-        audioBitsPerSecond: 128000
+        audioBitsPerSecond: 320000 // 320 kbps for high fidelity audio
     };
 
     try {
