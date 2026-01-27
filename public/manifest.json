@@ -1,19 +1,19 @@
 {
-  "short_name": "Camera",
-  "name": "WiFi Camera Remote",
+  "short_name": "ProCam",
+  "name": "WiFi Pro Camera",
   "icons": [
     {
-      "src": "/icons/icon-192.png",
+      "src": "icons/icon-192.png",
       "type": "image/png",
       "sizes": "192x192"
     },
     {
-      "src": "/icons/icon-512.png",
+      "src": "icons/icon-512.png",
       "type": "image/png",
       "sizes": "512x512"
     }
   ],
-  "start_url": "/index.html",
+  "start_url": "cam.html",
   "background_color": "#000000",
   "display": "standalone",
   "scope": "/",

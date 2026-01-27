@@ -1,170 +1,70 @@
-const socket = io();
-setupRemoteLogging(socket, 'Remote');
+const socket = io({ transports: ['polling', 'websocket'] });
+window.Logger.init(socket, 'Remote');
 
-const remoteView = document.getElementById('remote-view');
-const statusDisplay = document.getElementById('status-display');
-const shutterBtn = document.getElementById('shutter-btn');
-const photoBtn = document.getElementById('photo-btn');
-const torchBtn = document.getElementById('torch-btn');
-const zoomSlider = document.getElementById('zoom-slider');
-const switchCamBtn = document.getElementById('switch-cam-btn');
-const resSelect = document.getElementById('resolution-select');
-const fpsSelect = document.getElementById('framerate-select');
-const lensSelect = document.getElementById('lens-select');
-const exposureSlider = document.getElementById('exposure-slider');
-const focusSlider = document.getElementById('focus-slider');
-
-let peerConnection;
-let isRecording = false;
-let torchState = false;
-
-// WebRTC Configuration
-const rtcConfig = {
-    iceServers: [
-        { urls: 'stun:stun.l.google.com:19302' }
-    ]
+const els = {
+    video: document.getElementById('remote-video'),
+    status: document.getElementById('status'),
+    lensSelect: document.getElementById('lens-select'),
+    shutter: document.getElementById('shutter')
 };
 
-// Join as remote
-socket.emit('join-remote');
-socket.emit('get-devices');
+let peer = null;
+let recording = false;
 
-// --- Event Listeners ---
-
-shutterBtn.addEventListener('click', () => {
-    if (!isRecording) {
-        socket.emit('trigger-record');
-    } else {
-        socket.emit('trigger-stop');
-    }
+// --- 1. Connection & Setup ---
+socket.on('connect', () => {
+    els.status.innerText = 'Connected';
+    socket.emit('join-remote');
+    socket.emit('get-devices'); // Ask for the lens list immediately
 });
 
-photoBtn.addEventListener('click', () => {
-    socket.emit('trigger-photo');
-    // Visual feedback
-    photoBtn.style.transform = "scale(0.9)";
-    setTimeout(() => photoBtn.style.transform = "scale(1)", 100);
-});
+socket.on('disconnect', () => els.status.innerText = 'Disconnected');
 
-torchBtn.addEventListener('click', () => {
-    torchState = !torchState;
-    socket.emit('control-camera', { torch: torchState });
-    torchBtn.classList.toggle('active', torchState);
-});
-
-// Pro Controls
-lensSelect.addEventListener('change', () => {
-    if (lensSelect.value) {
-        socket.emit('switch-lens', lensSelect.value);
-    }
-});
-
-exposureSlider.addEventListener('input', (e) => {
-    socket.emit('control-camera', { exposureCompensation: parseFloat(e.target.value) });
-});
-
-focusSlider.addEventListener('input', (e) => {
-    socket.emit('control-camera', { focusMode: 'manual', focusDistance: parseFloat(e.target.value) });
-});
-
-switchCamBtn.addEventListener('click', () => {
-    socket.emit('switch-camera');
-});
-
-resSelect.addEventListener('change', () => {
-    socket.emit('control-camera', { resolution: resSelect.value });
-});
-
-fpsSelect.addEventListener('change', () => {
-    socket.emit('control-camera', { frameRate: fpsSelect.value });
-});
-
-// --- WebRTC Logic ---
+// --- 2. WebRTC Handling ---
+const rtcConfig = { iceServers: [{ urls: 'stun:stun.l.google.com:19302' }] };
 
 socket.on('offer', async (offer) => {
-    if (peerConnection) peerConnection.close();
+    if (peer) peer.close();
+    peer = new RTCPeerConnection(rtcConfig);
     
-    peerConnection = new RTCPeerConnection(rtcConfig);
-    
-    peerConnection.ontrack = (event) => {
-        remoteView.srcObject = event.streams[0];
+    peer.ontrack = e => {
+        els.video.srcObject = e.streams[0];
     };
     
-    peerConnection.onicecandidate = (event) => {
-        if (event.candidate) {
-            socket.emit('remote-candidate', event.candidate);
-        }
+    peer.onicecandidate = e => {
+        if (e.candidate) socket.emit('remote-candidate', e.candidate);
     };
     
-    await peerConnection.setRemoteDescription(new RTCSessionDescription(offer));
-    const answer = await peerConnection.createAnswer();
-    await peerConnection.setLocalDescription(answer);
+    await peer.setRemoteDescription(offer);
+    const answer = await peer.createAnswer();
+    await peer.setLocalDescription(answer);
     
     socket.emit('answer', answer);
 });
 
-socket.on('camera-candidate', async (candidate) => {
-    if (peerConnection) {
-        try {
-            await peerConnection.addIceCandidate(new RTCIceCandidate(candidate));
-        } catch (e) {
-            console.error('Error adding received ice candidate', e);
-        }
-    }
-});
+socket.on('camera-candidate', c => peer && peer.addIceCandidate(c));
 
-// --- Status & Capability Updates ---
 
-socket.on('status-update', (status) => {
-    if (status === 'recording') {
-        isRecording = true;
-        shutterBtn.classList.add('recording');
-        statusDisplay.innerText = 'REC ●';
-        statusDisplay.style.color = 'var(--accent-red)';
-    } else if (status === 'standby') {
-        isRecording = false;
-        shutterBtn.classList.remove('recording');
-        statusDisplay.innerText = 'Ready';
-        statusDisplay.style.color = 'var(--accent-green)';
-    } else if (status === 'saving') {
-        statusDisplay.innerText = 'Saving...';
-        statusDisplay.style.color = 'var(--accent-blue)';
-    }
-});
-
-socket.on('camera-capabilities', (caps) => {
-    if (caps.zoom) {
-        zoomSlider.disabled = false;
-        zoomSlider.min = caps.zoom.min;
-        zoomSlider.max = caps.zoom.max;
-        zoomSlider.step = caps.zoom.step;
-    } else {
-        zoomSlider.disabled = true;
-    }
-
-    if (caps.torch) {
-        torchBtn.disabled = false;
-    } else {
-        torchBtn.disabled = true;
-        torchBtn.style.opacity = 0.5;
-    }
-});
-
-socket.on('camera-devices', (devices) => {
-    lensSelect.innerHTML = '<option value="" disabled selected>Lens...</option>';
-    devices.forEach(device => {
-        const option = document.createElement('option');
-        option.value = device.deviceId;
-        option.text = device.label || `Camera ${device.deviceId.substr(0, 5)}...`;
-        lensSelect.appendChild(option);
+// --- 3. UI Updates ---
+socket.on('camera-devices', (devs) => {
+    els.lensSelect.innerHTML = '<option value="" disabled selected>Lens...</option>';
+    devs.forEach(d => {
+        const opt = document.createElement('option');
+        opt.value = d.deviceId;
+        opt.innerText = d.label || d.deviceId.substr(0, 8);
+        els.lensSelect.appendChild(opt);
     });
 });
 
-socket.on('connect', () => {
-    statusDisplay.innerText = 'Connected';
+socket.on('camera-state', (state) => {
+    recording = (state === 'recording');
+    if (recording) els.shutter.classList.add('recording');
+    else els.shutter.classList.remove('recording');
 });
 
-socket.on('disconnect', () => {
-    statusDisplay.innerText = 'Disconnected';
-    statusDisplay.style.color = 'gray';
+
+// --- 4. Controls ---
+els.shutter.addEventListener('click', () => {
+    if (recording) socket.emit('stop-recording');
+    else socket.emit('start-recording');
 });

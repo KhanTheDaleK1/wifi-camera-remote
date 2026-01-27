@@ -3,77 +3,26 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>WiFi Camera Remote | Setup</title>
-    
-    <!-- PWA Settings -->
-    <link rel="manifest" href="/manifest.json">
-    <meta name="apple-mobile-web-app-capable" content="yes">
-    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
-    <meta name="apple-mobile-web-app-title" content="Camera Remote">
-    <link rel="apple-touch-icon" href="/icons/icon-192.png">
-
+    <title>WiFi Camera</title>
     <link rel="stylesheet" href="css/style.css">
-    <style>
-        .setup-card {
-            background: #222;
-            padding: 40px;
-            border-radius: 24px;
-            box-shadow: 0 10px 30px rgba(0,0,0,0.5);
-            max-width: 400px;
-            margin: 0 auto;
-        }
-        #qr-code {
-            width: 250px;
-            height: 250px;
-            background: white;
-            padding: 10px;
-            border-radius: 12px;
-            margin: 20px auto;
-        }
-        .network-url {
-            font-family: monospace;
-            background: #333;
-            padding: 10px;
-            border-radius: 8px;
-            font-size: 0.9rem;
-            word-break: break-all;
-        }
-        .mode-buttons {
-            display: grid;
-            grid-template-columns: 1fr 1fr;
-            gap: 15px;
-            margin-top: 30px;
-        }
-    </style>
 </head>
-<body>
-    <div class="container">
-        <div class="setup-card">
-            <h1>Camera Remote</h1>
-            <p>Scan with your iPhone to start</p>
-            <div id="qr-code-container">
-                <img id="qr-code" src="" alt="Scan Me">
-            </div>
-            <p class="network-url" id="network-url">Detecting...</p>
-            
-            <div class="mode-buttons">
-                <a href="remote.html" class="btn btn-remote">Open Remote</a>
-                <a href="cam.html" class="btn btn-camera">Manual Cam</a>
-            </div>
-        </div>
+<body class="flex center col">
+    <h1>WiFi Camera Remote</h1>
+    <div style="margin-top: 30px; display: flex; gap: 20px;">
+        <a href="cam.html" class="btn btn-primary" style="text-decoration:none;">Start Camera</a>
+        <a href="remote.html" class="btn" style="text-decoration:none;">Open Remote</a>
     </div>
+    
+    <div id="qr-container" style="margin-top: 40px; background: white; padding: 10px; border-radius: 10px;">
+        <img id="qr" style="width: 200px; height: 200px;">
+    </div>
+    <p id="url" style="color: #888; margin-top: 10px; font-family: monospace;"></p>
 
     <script>
-        fetch('/network-info')
-            .then(res => res.json())
-            .then(data => {
-                document.getElementById('qr-code').src = data.qr;
-                document.getElementById('network-url').innerText = data.url;
-            });
-            
-        if ('serviceWorker' in navigator) {
-            navigator.serviceWorker.register('/sw.js');
-        }
+        fetch('/network-info').then(r => r.json()).then(d => {
+            document.getElementById('qr').src = d.qr;
+            document.getElementById('url').innerText = d.url;
+        });
     </script>
 </body>
 </html>

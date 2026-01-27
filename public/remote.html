@@ -3,221 +3,79 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Remote Control</title>
-    
-    <link rel="manifest" href="/manifest.json">
-    <meta name="apple-mobile-web-app-capable" content="yes">
-    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
-    <link rel="apple-touch-icon" href="/icons/icon-192.png">
-
+    <title>Remote</title>
     <link rel="stylesheet" href="css/style.css">
-    <style>
-        .remote-layout {
-            display: grid;
-            grid-template-rows: auto 1fr auto;
-            height: 100vh;
-            width: 100%;
-            max-width: 800px;
-            margin: 0 auto;
-            gap: 10px;
-        }
-
-        /* Header */
-        .remote-header {
-            padding: 10px;
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-            background: #222;
-        }
-        
-        .status-text {
-            font-size: 1rem;
-            margin: 0;
-        }
-
-        /* Video Feed */
-        .video-container {
-            position: relative;
-            background: #000;
-            width: 100%;
-            height: 100%;
-            overflow: hidden;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-        }
-        
-        #remote-view {
-            width: 100%;
-            height: 100%;
-            object-fit: contain;
-        }
-
-        /* Controls */
-        .controls-area {
-            padding: 20px;
-            background: #1a1a1a;
-            display: flex;
-            flex-direction: column;
-            gap: 15px;
-        }
-
-        .primary-controls {
-            display: flex;
-            justify-content: space-around;
-            align-items: center;
-        }
-
-        .secondary-controls {
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-            padding: 0 10px;
-        }
-
-        /* Buttons */
-        #shutter-btn {
-            width: 80px;
-            height: 80px;
-            border-radius: 50%;
-            background-color: var(--bg-color);
-            border: 4px solid white;
-            padding: 4px;
-            cursor: pointer;
-            display: flex;
-            justify-content: center;
-            align-items: center;
-        }
-
-        #shutter-inner {
-            width: 100%;
-            height: 100%;
-            border-radius: 50%;
-            background-color: var(--accent-red);
-            transition: all 0.2s;
-        }
-
-        #shutter-btn.recording #shutter-inner {
-            width: 50%;
-            height: 50%;
-            border-radius: 4px;
-        }
-
-        .icon-btn {
-            background: #333;
-            border: none;
-            color: white;
-            padding: 12px;
-            border-radius: 50%;
-            font-size: 1.2rem;
-            cursor: pointer;
-            width: 50px;
-            height: 50px;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-        }
-        
-        .icon-btn.active {
-            background-color: var(--accent-blue);
-            color: white;
-        }
-
-        /* Sliders */
-        .slider-group {
-            display: flex;
-            align-items: center;
-            gap: 10px;
-            flex-grow: 1;
-            margin-right: 20px;
-        }
-
-        .settings-group {
-            display: flex;
-            gap: 5px;
-            margin-right: 10px;
-        }
-
-        .settings-select {
-            background: #333;
-            color: white;
-            border: none;
-            padding: 5px 10px;
-            border-radius: 8px;
-            font-size: 0.9rem;
-        }
-        
-        input[type=range] {
-            width: 100%;
-        }
-
-    </style>
+    <link rel="manifest" href="manifest.json">
 </head>
 <body>
     <div class="remote-layout">
-        <div class="remote-header">
-            <div class="status-text" id="status-display">Connecting...</div>
-            <button class="icon-btn" id="switch-cam-btn" title="Switch Camera">↻</button>
+        <!-- Header -->
+        <div class="header">
+            <div id="status">Connecting...</div>
+            <button class="btn" onclick="socket.emit('switch-camera')">↻ Cam</button>
         </div>
 
-        <div class="video-container">
-            <video id="remote-view" autoplay playsinline muted></video>
+        <!-- Video -->
+        <div class="viewport">
+            <video id="remote-video" autoplay playsinline controls></video>
         </div>
 
-        <div class="controls-area">
-            <div class="secondary-controls">
-                <div class="settings-group">
-                    <select id="resolution-select" class="settings-select">
-                        <option value="720p">720p</option>
-                        <option value="1080p">1080p</option>
-                        <option value="4K">4K</option>
-                    </select>
-                    <select id="framerate-select" class="settings-select">
-                        <option value="30">30 FPS</option>
-                        <option value="60">60 FPS</option>
-                        <option value="24">24 FPS</option>
-                    </select>
-                </div>
+        <!-- Controls -->
+        <div class="controls">
+            <!-- Pro Controls Row 1 -->
+            <div class="control-row">
+                <select id="lens-select" onchange="socket.emit('switch-lens', this.value)">
+                    <option value="" disabled selected>Lens...</option>
+                </select>
                 
-                <div class="settings-group">
-                    <select id="lens-select" class="settings-select" style="max-width: 100px;">
-                        <option value="" disabled selected>Lens...</option>
-                    </select>
-                </div>
-
-                <button class="icon-btn" id="torch-btn" title="Toggle Flash/Torch">⚡</button>
+                <select onchange="socket.emit('control-camera', { resolution: this.value })">
+                    <option value="720p">720p</option>
+                    <option value="1080p" selected>1080p</option>
+                    <option value="4K">4K</option>
+                </select>
+                
+                <select id="fps-select" onchange="socket.emit('control-camera', { frameRate: this.value })">
+                    <option value="24">24 FPS</option>
+                    <option value="30" selected>30 FPS</option>
+                    <option value="60">60 FPS</option>
+                    <option value="120">120 FPS (Slo-mo)</option>
+                </select>
+                
+                <button class="btn" onclick="socket.emit('control-camera', { torch: true })">⚡ On</button>
+                <button class="btn" onclick="socket.emit('control-camera', { torch: false })">⚡ Off</button>
             </div>
 
-            <!-- Pro Controls Row -->
-            <div class="secondary-controls" style="margin-top: 10px; font-size: 0.8rem;">
-                 <div class="slider-group">
-                    <span>Exp</span>
-                    <input type="range" id="exposure-slider" min="-2" max="2" step="0.5" value="0">
-                </div>
-                <div class="slider-group">
-                    <span>Foc</span>
-                    <input type="range" id="focus-slider" min="0" max="1" step="0.1" value="0.5">
-                </div>
+            <!-- Sliders -->
+            <div class="control-row">
+                <span>Zoom</span>
+                <input type="range" min="1" max="10" step="0.1" value="1" 
+                       oninput="socket.emit('control-camera', { zoom: parseFloat(this.value) })">
+            </div>
+            
+            <div class="control-row">
+                <span>Focus</span>
+                <input type="range" min="0" max="1" step="0.1" value="0.5" 
+                       oninput="socket.emit('control-camera', { focusDistance: parseFloat(this.value) })">
+            </div>
+             
+             <div class="control-row">
+                <span>Exp</span>
+                <input type="range" min="-2" max="2" step="0.5" value="0" 
+                       oninput="socket.emit('control-camera', { exposureCompensation: parseFloat(this.value) })">
             </div>
 
-            <div class="primary-controls">
-                <button class="icon-btn" id="photo-btn" title="Take Photo">📷</button>
-                <div id="shutter-btn">
+            <!-- Primary Actions -->
+            <div class="control-row center" style="margin-top: 10px;">
+                <button class="btn" onclick="socket.emit('take-photo')">📷</button>
+                <div id="shutter">
                     <div id="shutter-inner"></div>
                 </div>
-                <div style="width: 50px;"></div> <!-- Spacer for balance -->
             </div>
         </div>
     </div>
 
     <script src="/socket.io/socket.io.js"></script>
-    <script src="js/logging.js"></script>
+    <script src="js/utils.js"></script>
     <script src="js/remote.js"></script>
-    <script>
-        if ('serviceWorker' in navigator) {
-            navigator.serviceWorker.register('/sw.js');
-        }
-    </script>
 </body>
 </html>

@@ -3,77 +3,37 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>Camera | WiFi Remote</title>
-    
-    <link rel="manifest" href="/manifest.json">
-    <meta name="apple-mobile-web-app-capable" content="yes">
-    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
-    <link rel="apple-touch-icon" href="/icons/icon-192.png">
-    
+    <title>Camera</title>
     <link rel="stylesheet" href="css/style.css">
-    <style>
-        body { background: black; margin: 0; overflow: hidden; }
-        .camera-ui {
-            position: absolute;
-            bottom: 30px;
-            width: 100%;
-            text-align: center;
-            pointer-events: none; /* Let clicks pass through except buttons */
-        }
-        #download-btn {
-            pointer-events: auto;
-            display: inline-block;
-            background: white;
-            color: black;
-            padding: 10px 20px;
-            border-radius: 20px;
-            text-decoration: none;
-            font-weight: bold;
-            opacity: 0;
-            transition: opacity 0.3s;
-        }
-        #download-btn.visible {
-            opacity: 1;
-        }
-    </style>
+    <link rel="manifest" href="manifest.json">
 </head>
 <body>
-    <div class="camera-container">
-        <video id="viewfinder" autoplay playsinline muted></video>
-        
-        <div class="status-overlay">
-            <div id="rec-dot" class="recording-dot"></div>
+    <!-- Start Screen (Forces Interaction) -->
+    <div id="start-screen" class="fill center">
+        <h1>Tap to Start Camera</h1>
+        <p style="color: #888;">Fullscreen | No Sleep</p>
+    </div>
+
+    <!-- Viewfinder -->
+    <video id="viewfinder" autoplay playsinline muted></video>
+
+    <!-- Overlay UI -->
+    <div id="camera-overlay" class="hidden">
+        <div class="status-bar">
+            <div id="rec-dot" class="rec-indicator"></div>
             <span id="status-text">Standby</span>
         </div>
-
-            <div class="camera-ui">
-                <button id="reset-btn" style="position: absolute; top: -500px; left: 20px; background: rgba(0,0,0,0.5); color: white; border: 1px solid white; padding: 5px; border-radius: 5px; pointer-events: auto;">Reset App</button>
-                <a id="download-btn" href="#">Tap to Save Video</a>
-            </div>
-            
-            <script>
-                // Make reset button visible if tapped in top left corner (hidden area hack) or just visible for now
-                document.getElementById('reset-btn').style.top = '40px'; 
-                
-                document.getElementById('reset-btn').addEventListener('click', async () => {
-                     if ('serviceWorker' in navigator) {
-                        const registrations = await navigator.serviceWorker.getRegistrations();
-                        for(let registration of registrations) {
-                            await registration.unregister();
-                        }
-                     }
-                     window.location.reload(true);
-                });
-            </script>
-        </div>
         
-    <script>
-        // Visual confirmation of fresh load
-        document.body.insertAdjacentHTML('afterbegin', `<div style="position:absolute;top:0;left:0;color:lime;z-index:9999;">Loaded: ${new Date().toLocaleTimeString()}</div>`);
-        alert('Script Starting...');
-    </script>
+        <!-- Bottom Controls (Local) -->
+        <div style="pointer-events: auto; align-self: center;">
+            <button id="dl-btn" class="btn hidden">Save Video</button>
+        </div>
+    </div>
+
+    <!-- Scripts -->
+    <script src="/node_modules/nosleep.js/dist/NoSleep.min.js"></script>
     <script src="/socket.io/socket.io.js"></script>
-    <script src="js/logging.js"></script>
+    <script src="js/utils.js"></script>
     <script src="js/camera.js"></script>
 </body>
 </html>

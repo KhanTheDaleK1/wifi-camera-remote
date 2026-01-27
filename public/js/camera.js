@@ -1,353 +1,256 @@
-const socket = io({
-    transports: ['polling', 'websocket'], // Force polling first
-    reconnection: true,
-    reconnectionAttempts: 5
-});
+const socket = io({ transports: ['polling', 'websocket'] });
+window.Logger.init(socket, 'Camera');
 
-socket.on('connect_error', (err) => {
-    updateStatus('Socket Error: ' + err.message);
-    // Also try to alert if the logging system isn't connected
-    console.error('Socket Connect Error:', err);
-});
-
-setupRemoteLogging(socket, 'Camera');
-
-const viewfinder = document.getElementById('viewfinder');
-const statusText = document.getElementById('status-text');
-const recDot = document.getElementById('rec-dot');
-const downloadBtn = document.getElementById('download-btn');
-
-let mediaRecorder;
-let recordedChunks = [];
-let stream = null;
-let peerConnection;
-let currentFacingMode = 'environment';
-let track;
-const noSleep = new NoSleep();
-
-const rtcConfig = {
-    iceServers: [
-        { urls: 'stun:stun.l.google.com:19302' }
-    ]
+const els = {
+    start: document.getElementById('start-screen'),
+    overlay: document.getElementById('camera-overlay'),
+    video: document.getElementById('viewfinder'),
+    status: document.getElementById('status-text'),
+    recDot: document.getElementById('rec-dot'),
+    dlBtn: document.getElementById('dl-btn')
 };
 
-// Initialize Camera
-async function initCamera(specificDeviceId = null) {
-    updateStatus('Connecting to Server...');
-    
-    // Enable NoSleep on first touch to keep screen on
-    document.addEventListener('click', function enableNoSleep() {
-        noSleep.enable();
-        document.removeEventListener('click', enableNoSleep);
-    }, { once: true });
+const noSleep = new NoSleep();
+let stream = null;
+let track = null;
+let peer = null;
+let recorder = null;
+let chunks = [];
+let state = 'IDLE'; // IDLE, PREVIEW, RECORDING
 
-
+// --- 1. Initialization (User Interaction) ---
+els.start.addEventListener('click', async () => {
     try {
-        if (stream) {
-            stream.getTracks().forEach(track => track.stop());
-        }
-
-        const constraints = {
-            audio: true,
-            video: {}
-        };
-
-        if (specificDeviceId) {
-            constraints.video.deviceId = { exact: specificDeviceId };
-        } else {
-            // Default to environment if not specified
-            constraints.video.facingMode = currentFacingMode || 'environment';
-        }
+        noSleep.enable(); // Wake Lock
+        els.start.classList.add('hidden');
+        els.overlay.classList.remove('hidden');
         
-        stream = await navigator.mediaDevices.getUserMedia(constraints);
-        viewfinder.srcObject = stream;
-        
-        // Force play
-        try {
-            await viewfinder.play();
-        } catch (playErr) {
-            updateStatus('Play Error: ' + playErr.message);
-            console.error('Play Error:', playErr);
-        }
-        
-        // Get video track for capabilities
-        const videoTracks = stream.getVideoTracks();
-        if (!videoTracks.length) {
-            throw new Error("No video tracks found.");
-        }
-        const videoTrack = videoTracks[0];
-        track = videoTrack;
-        
-        // Debug Info
-        const settings = videoTrack.getSettings();
-        const debugText = `Cam: ${settings.deviceId ? settings.deviceId.substr(0,4) : 'Def'} | Res: ${settings.width}x${settings.height} | State: ${videoTrack.readyState} | Enabled: ${videoTrack.enabled}`;
-        console.log(debugText); // Keep for remote debug if needed
-        
-        // Append to status for visibility
-        updateStatus('Standby');
-        const debugEl = document.createElement('div');
-        debugEl.style.fontSize = '10px';
-        debugEl.style.color = '#555';
-        debugEl.innerText = debugText;
-        document.querySelector('.status-overlay').appendChild(debugEl);
-        
-        // Broadcast capabilities
-        let capabilities = {};
-        try {
-            capabilities = videoTrack.getCapabilities ? videoTrack.getCapabilities() : {};
-        } catch (e) {
-            console.error('Could not get caps', e);
-        }
-
-        // iOS fallback: iOS often doesn't report zoom/torch via getCapabilities but supports them.
-        // We force-report them so the remote UI enables the controls.
-        if (!capabilities.zoom) {
-            capabilities.zoom = { min: 1, max: 10, step: 0.1 };
-        }
-        if (!capabilities.torch && typeof capabilities.torch === 'undefined') {
-            // Assume torch might be available
-            capabilities.torch = true; 
-        }
-
-        socket.emit('camera-capabilities', {
-            zoom: capabilities.zoom,
-            torch: capabilities.torch
-        });
-        
-        // Enumerate Devices (Lenses)
-        await broadcastDevices();
+        await startCamera();
         
         socket.emit('join-camera');
-        updateStatus('Standby');
-        
-        // Initiate WebRTC Stream
-        startWebRTC();
-        
-    } catch (err) {
-        console.error('Camera Error:', err);
-        updateStatus('Error: ' + err.message);
-        socket.emit('camera-error', err.message);
+        updateStatus('Ready');
+    } catch (e) {
+        showError(e);
     }
+});
+
+// --- 2. Camera Management ---
+async function startCamera(deviceId = null) {
+    if (stream) {
+        stream.getTracks().forEach(t => t.stop());
+    }
+
+    const constraints = {
+        audio: true,
+        video: {
+            // Default to environment, simple settings first
+            facingMode: deviceId ? undefined : 'environment',
+            deviceId: deviceId ? { exact: deviceId } : undefined,
+            // Don't force resolution yet to avoid "OverconstrainedError" on old devices
+        }
+    };
+
+    try {
+        stream = await navigator.mediaDevices.getUserMedia(constraints);
+        els.video.srcObject = stream;
+        await els.video.play(); // Explicit play
+        
+        track = stream.getVideoTracks()[0];
+        
+        // Broadcast capabilities
+        broadcastCaps();
+        broadcastDevices();
+        
+        // Start WebRTC
+        initPeer();
+
+    } catch (e) {
+        throw new Error(`Cam Init Failed: ${e.message}`);
+    }
+}
+
+function broadcastCaps() {
+    if (!track) return;
+    const caps = track.getCapabilities ? track.getCapabilities() : {};
+    // iOS Fallbacks
+    if (!caps.zoom) caps.zoom = { min: 1, max: 10, step: 0.1 };
+    if (!caps.torch) caps.torch = true;
+    
+    socket.emit('camera-capabilities', caps);
 }
 
 async function broadcastDevices() {
-    try {
-        const devices = await navigator.mediaDevices.enumerateDevices();
-        const videoDevices = devices.filter(device => device.kind === 'videoinput');
-        socket.emit('camera-devices', videoDevices);
-    } catch (e) {
-        console.error('Error enumerating devices:', e);
-    }
+    const devs = await navigator.mediaDevices.enumerateDevices();
+    socket.emit('camera-devices', devs.filter(d => d.kind === 'videoinput'));
 }
 
-// Start WebRTC Streaming
-async function startWebRTC() {
-    if (peerConnection) peerConnection.close();
+// --- 3. WebRTC Streaming ---
+const rtcConfig = { iceServers: [{ urls: 'stun:stun.l.google.com:19302' }] };
+
+function initPeer() {
+    if (peer) peer.close();
+    peer = new RTCPeerConnection(rtcConfig);
     
-    peerConnection = new RTCPeerConnection(rtcConfig);
+    stream.getTracks().forEach(t => peer.addTrack(t, stream));
     
-    // Add tracks to connection
-    stream.getTracks().forEach(track => {
-        peerConnection.addTrack(track, stream);
+    peer.onicecandidate = e => {
+        if (e.candidate) socket.emit('camera-candidate', e.candidate);
+    };
+    
+    peer.createOffer().then(o => peer.setLocalDescription(o)).then(() => {
+        socket.emit('offer', peer.localDescription);
     });
-    
-    peerConnection.onicecandidate = (event) => {
-        if (event.candidate) {
-            socket.emit('camera-candidate', event.candidate);
-        }
-    };
-    
-    const offer = await peerConnection.createOffer();
-    await peerConnection.setLocalDescription(offer);
-    socket.emit('offer', offer);
 }
 
-socket.on('answer', async (answer) => {
-    if (peerConnection) {
-        await peerConnection.setRemoteDescription(new RTCSessionDescription(answer));
-    }
-});
-
-socket.on('remote-candidate', async (candidate) => {
-    if (peerConnection) {
-        try {
-            await peerConnection.addIceCandidate(new RTCIceCandidate(candidate));
-        } catch (e) {
-            console.error('Error adding remote ice candidate', e);
-        }
-    }
+socket.on('answer', ans => peer && peer.setRemoteDescription(ans));
+socket.on('remote-candidate', c => peer && peer.addIceCandidate(c));
+socket.on('request-state', () => {
+    broadcastCaps(); 
+    broadcastDevices();
+    // Re-offer if needed
+    if (peer && peer.signalingState === 'stable') initPeer();
 });
 
 
-// Recording Logic
-function startRecording() {
+// --- 4. Recording ---
+function startRecord() {
     if (!stream) return;
+    chunks = [];
     
-    recordedChunks = [];
-    const mimeTypes = ['video/webm;codecs=vp8,opus', 'video/mp4', 'video/webm'];
-    let options = {};
-    for (let type of mimeTypes) {
-        if (MediaRecorder.isTypeSupported(type)) {
-            options = { mimeType: type };
-            break;
-        }
-    }
-
     try {
-        mediaRecorder = new MediaRecorder(stream, options);
+        // Try better codecs if available
+        const options = MediaRecorder.isTypeSupported('video/mp4') ? { mimeType: 'video/mp4' } : {};
+        recorder = new MediaRecorder(stream, options);
     } catch (e) {
-        mediaRecorder = new MediaRecorder(stream);
+        recorder = new MediaRecorder(stream);
     }
 
-    mediaRecorder.ondataavailable = (event) => {
-        if (event.data.size > 0) recordedChunks.push(event.data);
-    };
-
-    mediaRecorder.onstop = saveVideo;
-
-    mediaRecorder.start();
-    updateStatus('Recording');
-    recDot.classList.add('active');
-    socket.emit('camera-status', 'recording');
+    recorder.ondataavailable = e => { if (e.data.size > 0) chunks.push(e.data); };
+    recorder.onstop = saveRecord;
     
-    downloadBtn.classList.remove('visible');
-    downloadBtn.href = '#';
+    recorder.start();
+    state = 'RECORDING';
+    updateStatus('REC');
+    els.recDot.classList.add('active');
+    els.dlBtn.classList.add('hidden');
+    socket.emit('camera-state', 'recording');
 }
 
-function stopRecording() {
-    if (mediaRecorder && mediaRecorder.state !== 'inactive') {
-        mediaRecorder.stop();
+function stopRecord() {
+    if (recorder && state === 'RECORDING') {
+        recorder.stop();
+        state = 'PREVIEW';
         updateStatus('Saving...');
-        recDot.classList.remove('active');
-        socket.emit('camera-status', 'saving');
+        els.recDot.classList.remove('active');
+        socket.emit('camera-state', 'idle');
     }
 }
 
-function saveVideo() {
-    const blob = new Blob(recordedChunks, { type: mediaRecorder.mimeType || 'video/webm' });
+function saveRecord() {
+    const blob = new Blob(chunks, { type: recorder.mimeType });
     const url = URL.createObjectURL(blob);
-    const filename = `rec_${Date.now()}.mp4`; // Keep simple extension
+    const fname = `rec_${Date.now()}.${blob.type.includes('mp4') ? 'mp4' : 'webm'}`;
     
-    downloadBtn.href = url;
-    downloadBtn.download = filename;
-    downloadBtn.classList.add('visible');
-    downloadBtn.innerText = 'Tap to Save Video';
-    
-    updateStatus('Standby');
-    socket.emit('camera-status', 'standby');
+    els.dlBtn.onclick = () => {
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = fname;
+        a.click();
+    };
+    els.dlBtn.classList.remove('hidden');
+    updateStatus('File Ready');
 }
 
-// Photo Logic
 function takePhoto() {
-    // Canvas Fallback method (more reliable for live view capture)
     const canvas = document.createElement('canvas');
-    canvas.width = viewfinder.videoWidth;
-    canvas.height = viewfinder.videoHeight;
-    const ctx = canvas.getContext('2d');
-    ctx.drawImage(viewfinder, 0, 0);
+    canvas.width = els.video.videoWidth;
+    canvas.height = els.video.videoHeight;
+    canvas.getContext('2d').drawImage(els.video, 0, 0);
     
-    canvas.toBlob((blob) => {
+    canvas.toBlob(blob => {
         const url = URL.createObjectURL(blob);
         const a = document.createElement('a');
         a.href = url;
         a.download = `photo_${Date.now()}.png`;
-        a.click(); // This works on many mobile browsers if user interaction recently happened, but might fail without explicit touch.
-        // If it fails, we might need a UI button "Download Photo" similar to video.
-        
-        // Show temporary message
-        const originalText = statusText.innerText;
-        updateStatus('Photo Saved!');
-        setTimeout(() => updateStatus(originalText), 1500);
+        a.click();
+        updateStatus('Photo Saved');
+        setTimeout(() => updateStatus('Ready'), 1500);
     }, 'image/png');
 }
 
-function updateStatus(text) {
-    statusText.innerText = text;
-    if (text.includes('Error')) {
-        statusText.style.color = 'red';
-        statusText.style.fontSize = '24px';
-        statusText.style.fontWeight = 'bold';
-        statusText.style.background = 'white';
-        statusText.style.padding = '10px';
-        statusText.style.display = 'block';
-        statusText.style.zIndex = '9999';
-    }
-}
 
-// Socket Events for Controls
-socket.on('start-recording', startRecording);
-socket.on('stop-recording', stopRecording);
+// --- 5. Controls & Events ---
+socket.on('start-recording', startRecord);
+socket.on('stop-recording', stopRecord);
 socket.on('take-photo', takePhoto);
 
-socket.on('request-status', () => {
-    const status = (mediaRecorder && mediaRecorder.state === 'recording') ? 'recording' : 'standby';
-    socket.emit('camera-status', status);
-});
-
-socket.on('apply-constraints', async (constraints) => {
-    if (!track) return;
-    
-    // Map custom resolution/fps strings to actual constraints
-    const advanced = {};
-    
-    if (constraints.resolution) {
-        if (constraints.resolution === '4K') {
-            advanced.width = { ideal: 3840 };
-            advanced.height = { ideal: 2160 };
-        } else if (constraints.resolution === '1080p') {
-            advanced.width = { ideal: 1920 };
-            advanced.height = { ideal: 1080 };
-        } else if (constraints.resolution === '720p') {
-            advanced.width = { ideal: 1280 };
-            advanced.height = { ideal: 720 };
-        }
-    }
-
-    if (constraints.frameRate) {
-        advanced.frameRate = { ideal: parseInt(constraints.frameRate) };
-    }
-    
-    // Pass through other constraints like torch/zoom
-    if (typeof constraints.zoom !== 'undefined') advanced.zoom = constraints.zoom;
-    if (typeof constraints.torch !== 'undefined') advanced.torch = constraints.torch;
-
-    // Pro Controls
-    if (typeof constraints.exposureCompensation !== 'undefined') {
-        advanced.exposureMode = 'continuous'; // or manual
-        advanced.exposureCompensation = constraints.exposureCompensation;
-    }
-    
-    if (constraints.focusMode === 'manual') {
-        advanced.focusMode = 'manual';
-        if (typeof constraints.focusDistance !== 'undefined') {
-             advanced.focusDistance = constraints.focusDistance;
-        }
-    }
-
-    try {
-        await track.applyConstraints({ advanced: [advanced] });
-    } catch (err) {
-        console.error('Error applying constraints:', err);
-    }
-});
-
 socket.on('switch-camera', () => {
-    currentFacingMode = (currentFacingMode === 'user') ? 'environment' : 'user';
-    initCamera(); // Re-init with new mode
+    // Basic toggle
+    const current = track.getSettings().facingMode;
+    const next = current === 'user' ? 'environment' : 'user';
+    // We restart completely to apply new constraints safely
+    // Note: This logic assumes simple switching. 
+    // Ideally we iterate devices, but this is a quick toggle.
+    if (stream) stream.getTracks().forEach(t => t.stop());
+    
+    navigator.mediaDevices.getUserMedia({ video: { facingMode: next }, audio: true })
+        .then(s => {
+            stream = s;
+            els.video.srcObject = s;
+            els.video.play();
+            track = s.getVideoTracks()[0];
+            initPeer(); // Re-negotiate WebRTC
+            broadcastCaps();
+        });
 });
 
-socket.on('switch-lens', (deviceId) => {
-    // Override facing mode if specific device selected
-    initCamera(deviceId);
+socket.on('switch-lens', (id) => startCamera(id)); // Re-init with specific ID
+
+socket.on('control-camera', async (c) => {
+    if (!track) return;
+    try {
+        const advanced = {};
+        // Map simplified keys to advanced constraints
+        if (c.zoom) advanced.zoom = c.zoom;
+        if (c.torch !== undefined) advanced.torch = c.torch;
+        if (c.exposureCompensation) advanced.exposureCompensation = c.exposureCompensation;
+        if (c.focusDistance) {
+            advanced.focusMode = 'manual';
+            advanced.focusDistance = c.focusDistance;
+        }
+        
+        // Resolution (Simple map)
+        // Note: applyConstraints for res often fails on mobile. 
+        // Better to re-getUserMedia, but let's try.
+        if (c.resolution) {
+           const map = { '4K': 2160, '1080p': 1080, '720p': 720 };
+           if (map[c.resolution]) {
+               // We actually need to re-request stream for resolution changes usually
+               // But let's try constraint application first
+               await track.applyConstraints({ height: { ideal: map[c.resolution] } });
+           }
+        }
+        
+        if (c.frameRate) {
+           advanced.frameRate = { ideal: parseInt(c.frameRate) };
+           // For high framerates (Slo-mo), we might need to apply it to the main constraint block
+           await track.applyConstraints({ frameRate: { ideal: parseInt(c.frameRate) } });
+        }
+        
+        await track.applyConstraints({ advanced: [advanced] });
+        console.log('Applied Constraints:', advanced);
+    } catch (e) {
 });
 
-socket.on('get-devices', () => {
-    broadcastDevices();
-});
 
-socket.on('connect', () => {
-    // Re-connected
-});
+// --- Helpers ---
+function updateStatus(msg) {
+    els.status.innerText = msg;
+    if (msg.includes('Error')) els.status.style.color = 'red';
+    else els.status.style.color = 'white';
+}
 
-// Initialize
-initCamera();
+function showError(err) {
+    alert(err.message); // Native alert is safest for critical failures
+    console.error(err);
+}

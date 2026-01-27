@@ -1,160 +1,169 @@
 :root {
-    --bg-color: #1a1a1a;
-    --text-color: #ffffff;
-    --accent-red: #ff3b30;
-    --accent-green: #34c759;
-    --accent-blue: #007aff;
-    --btn-bg: #333333;
+    --bg: #000;
+    --ui-bg: rgba(20, 20, 20, 0.9);
+    --text: #fff;
+    --accent: #0a84ff;
+    --record: #ff3b30;
+    --warn: #ff9f0a;
 }
 
 body {
-    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
-    background-color: var(--bg-color);
-    color: var(--text-color);
     margin: 0;
-    padding: 0;
-    display: flex;
-    justify-content: center;
-    align-items: center;
-    height: 100vh;
-    text-align: center;
+    background: var(--bg);
+    color: var(--text);
+    font-family: -apple-system, system-ui, sans-serif;
+    overflow: hidden; /* Prevent scrolling */
+    user-select: none;
 }
 
-.container {
-    padding: 20px;
-    width: 100%;
-    max-width: 600px;
+/* Common Utilities */
+.hidden { display: none !important; }
+.flex { display: flex; }
+.center { justify-content: center; align-items: center; }
+.col { flex-direction: column; }
+.fill { width: 100%; height: 100%; }
+
+/* Buttons */
+.btn {
+    background: var(--ui-bg);
+    border: 1px solid #333;
+    color: white;
+    padding: 12px 20px;
+    border-radius: 8px;
+    font-size: 16px;
+    cursor: pointer;
+    transition: 0.2s;
+}
+.btn:active { transform: scale(0.96); }
+.btn-primary { background: var(--accent); border-color: var(--accent); }
+
+/* --- Camera UI --- */
+#viewfinder {
+    position: fixed;
+    top: 0; left: 0;
+    width: 100vw; height: 100vh;
+    object-fit: cover;
+    z-index: 0;
 }
 
-h1 {
-    margin-bottom: 2rem;
-}
-
-.selection-menu {
+#camera-overlay {
+    position: absolute;
+    top: 0; left: 0;
+    width: 100%; height: 100%;
+    z-index: 10;
+    pointer-events: none; /* Let touches pass to generic areas */
     display: flex;
     flex-direction: column;
-    gap: 20px;
-}
-
-.btn {
-    display: block;
+    justify-content: space-between;
     padding: 20px;
-    border-radius: 12px;
-    text-decoration: none;
-    font-size: 1.2rem;
-    font-weight: bold;
-    color: white;
-    transition: transform 0.1s ease;
-    border: none;
-    cursor: pointer;
+    box-sizing: border-box;
 }
 
-.btn:active {
-    transform: scale(0.98);
-}
-
-.btn-camera {
-    background-color: var(--accent-blue);
-}
-
-.btn-remote {
-    background-color: var(--btn-bg);
-    border: 2px solid var(--accent-blue);
-}
-
-/* Camera Page Specifics */
-.camera-container {
-    position: relative;
-    width: 100%;
-    height: 100vh;
-    background: black;
-    overflow: hidden;
-}
-
-#viewfinder {
-    width: 100%;
-    height: 100%;
-    object-fit: cover;
-}
-
-.status-overlay {
-    position: absolute;
-    top: 20px;
-    left: 50%;
-    transform: translateX(-50%);
-    background: rgba(0,0,0,0.6);
-    padding: 8px 16px;
-    border-radius: 20px;
-    font-size: 0.9rem;
+.status-bar {
     display: flex;
-    align-items: center;
-    gap: 8px;
+    justify-content: center;
+    gap: 10px;
+    background: rgba(0,0,0,0.5);
+    padding: 8px;
+    border-radius: 20px;
+    align-self: center;
+    backdrop-filter: blur(5px);
 }
 
-.recording-dot {
-    width: 12px;
-    height: 12px;
-    background-color: #555;
+.rec-indicator {
+    width: 12px; height: 12px;
+    background: #555;
     border-radius: 50%;
 }
-
-.recording-dot.active {
-    background-color: var(--accent-red);
+.rec-indicator.active {
+    background: var(--record);
     animation: pulse 1s infinite;
 }
 
-@keyframes pulse {
-    0% { opacity: 1; }
-    50% { opacity: 0.5; }
-    100% { opacity: 1; }
-}
+@keyframes pulse { 0% { opacity: 1; } 50% { opacity: 0.5; } 100% { opacity: 1; } }
 
-/* Remote Page Specifics */
-.remote-container {
+#start-screen {
+    position: fixed;
+    z-index: 100;
+    background: #000;
     display: flex;
     flex-direction: column;
-    justify-content: center;
-    align-items: center;
+}
+
+/* --- Remote UI --- */
+.remote-layout {
+    display: grid;
+    grid-template-rows: 60px 1fr auto;
     height: 100vh;
-    gap: 30px;
+    max-width: 800px;
+    margin: 0 auto;
 }
 
-#shutter-btn {
-    width: 200px;
-    height: 200px;
-    border-radius: 50%;
-    background-color: var(--bg-color);
-    border: 8px solid var(--text-color);
-    position: relative;
-    cursor: pointer;
-    transition: all 0.2s ease;
+.header {
+    background: var(--ui-bg);
+    padding: 0 20px;
     display: flex;
-    justify-content: center;
     align-items: center;
-    -webkit-tap-highlight-color: transparent;
+    justify-content: space-between;
+    border-bottom: 1px solid #333;
 }
 
-#shutter-inner {
-    width: 160px;
-    height: 160px;
+.viewport {
+    background: #111;
+    position: relative;
+    overflow: hidden;
+}
+#remote-video {
+    width: 100%; height: 100%;
+    object-fit: contain;
+}
+
+.controls {
+    background: var(--ui-bg);
+    padding: 20px;
+    display: flex;
+    flex-direction: column;
+    gap: 15px;
+    border-top: 1px solid #333;
+}
+
+.control-row {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: 10px;
+}
+
+/* Sliders */
+input[type=range] {
+    flex-grow: 1;
+    accent-color: var(--accent);
+}
+
+/* Shutter */
+#shutter {
+    width: 70px; height: 70px;
     border-radius: 50%;
-    background-color: var(--accent-red);
-    transition: all 0.2s ease;
+    border: 4px solid white;
+    padding: 3px;
+    cursor: pointer;
+}
+#shutter-inner {
+    width: 100%; height: 100%;
+    background: var(--record);
+    border-radius: 50%;
+    transition: 0.2s;
+}
+#shutter.recording #shutter-inner {
+    border-radius: 6px;
+    transform: scale(0.6);
 }
 
-/* Recording State on Remote */
-#shutter-btn.recording {
-    border-color: var(--accent-red);
-}
-
-#shutter-btn.recording #shutter-inner {
-    width: 80px;
-    height: 80px;
-    border-radius: 12px; /* Square stop button */
-}
-
-.status-text {
-    font-size: 1.5rem;
-    font-weight: 500;
-    min-height: 2rem;
+/* Selects */
+select {
+    background: #333;
+    color: white;
+    border: none;
+    padding: 8px;
+    border-radius: 6px;
 }

@@ -6,160 +6,109 @@ const ip = require('ip');
 const path = require('path');
 const QRCode = require('qrcode');
 
-const app = express();
+// --- Configuration ---
 const PORT = 3000;
-const LOG_FILE = path.join(__dirname, 'debug.log');
+const LOG_FILE = path.join(__dirname, 'server.log');
 
-// Logger Utility
-function log(source, level, message) {
-    const timestamp = new Date().toISOString();
-    const logLine = `[${timestamp}] [${source}] [${level}] ${message}\n`;
-    
-    // Write to file
-    fs.appendFile(LOG_FILE, logLine, (err) => {
-        if (err) console.error('Log write failed:', err);
-    });
-    
-    // Write to console
-    const color = level === 'ERROR' || level === 'FATAL' ? '\x1b[31m' : '\x1b[32m'; // Red or Green
-    console.log(`${color}${logLine.trim()}\x1b[0m`);
-}
-
+// --- Setup ---
+const app = express();
 const server = https.createServer({
   key: fs.readFileSync('key.pem'),
   cert: fs.readFileSync('cert.pem')
 }, app);
 
-const io = socketIo(server);
+// Force polling for better iOS/Self-Signed Cert compatibility
+const io = socketIo(server, {
+    cors: { origin: "*" },
+    transports: ['polling', 'websocket'] 
+});
 
-const networkUrl = `https://${ip.address()}:${PORT}/cam.html`;
+// --- Logging System ---
+function log(source, level, message) {
+    const timestamp = new Date().toISOString();
+    const line = `[${timestamp}] [${source}] [${level}] ${message}`;
+    console.log(line);
+    fs.appendFile(LOG_FILE, line + '\n', () => {});
+}
 
-// Endpoints
+// --- Express Middleware ---
+app.use(express.static(path.join(__dirname, 'public')));
+app.use('/node_modules', express.static(path.join(__dirname, 'node_modules')));
+
+// --- Routes ---
 app.get('/network-info', async (req, res) => {
-    log('Server', 'INFO', `Request to /network-info from ${req.ip}`);
+    const url = `https://${ip.address()}:${PORT}/camera.html`;
     try {
-        const qrDataUrl = await QRCode.toDataURL(networkUrl);
-        res.json({ url: networkUrl, qr: qrDataUrl });
-    } catch (err) {
-        log('Server', 'ERROR', `QR Gen Error: ${err.message}`);
-        res.status(500).send(err);
+        const qr = await QRCode.toDataURL(url);
+        res.json({ url, qr });
+    } catch (e) {
+        res.status(500).send(e.toString());
     }
 });
 
 app.get('/logs', (req, res) => {
-    if (fs.existsSync(LOG_FILE)) {
-        res.sendFile(LOG_FILE);
-    } else {
-        res.send('No logs yet.');
-    }
+    if (fs.existsSync(LOG_FILE)) res.sendFile(LOG_FILE);
+    else res.send('No logs yet');
 });
 
-// Serve static files
-app.use(express.static(path.join(__dirname, 'public')));
-app.use('/node_modules', express.static(path.join(__dirname, 'node_modules')));
-
-// Socket.io connection handling
+// --- Socket.io Logic ---
 io.on('connection', (socket) => {
-  log('Server', 'INFO', `New Socket Connection: ${socket.id}`);
+    log('Server', 'INFO', `Client Connected: ${socket.id}`);
 
-  // Handle Client Logs
-  socket.on('client-log', (data) => {
-      log(data.source || 'Client', data.level || 'INFO', data.message);
-  });
-  
-  socket.on('join-camera', () => {
-    socket.join('camera');
-  });
+    // Client-side log forwarding
+    socket.on('log', (data) => {
+        log(data.source, data.level, data.message);
+    });
 
-  socket.on('join-remote', () => {
-    socket.join('remote');
-    io.to('camera').emit('request-status');
-  });
+    // Roles
+    socket.on('join-camera', () => {
+        socket.join('camera');
+        log('Server', 'INFO', 'Camera joined channel');
+    });
 
-  // Remote triggers
-  socket.on('trigger-stop', () => {
-    io.to('camera').emit('stop-recording');
-  });
+    socket.on('join-remote', () => {
+        socket.join('remote');
+        log('Server', 'INFO', 'Remote joined channel');
+        io.to('camera').emit('request-state'); // Sync state
+    });
 
-  socket.on('trigger-photo', () => {
-    io.to('camera').emit('take-photo');
-  });
+    // Signaling (WebRTC)
+    socket.on('offer', (d) => io.to('remote').emit('offer', d));
+    socket.on('answer', (d) => io.to('camera').emit('answer', d));
+    socket.on('ice-candidate', (d) => {
+        // Broadcast to "other" room implicitly by event name
+        // Camera sends 'ice-candidate', we assume it goes to Remote?
+        // Let's be explicit like before
+    });
+    
+    socket.on('camera-candidate', (d) => io.to('remote').emit('camera-candidate', d));
+    socket.on('remote-candidate', (d) => io.to('camera').emit('remote-candidate', d));
 
-  // Camera Control (Zoom, Torch, etc.)
-  socket.on('control-camera', (constraints) => {
-    io.to('camera').emit('apply-constraints', constraints);
-  });
-  
-  // Camera Switch
-  socket.on('switch-camera', () => {
-      io.to('camera').emit('switch-camera');
-  });
+    // Commands (Remote -> Camera)
+    const commands = [
+        'start-recording', 'stop-recording', 'take-photo', 
+        'switch-camera', 'switch-lens', 'control-camera', 
+        'get-devices'
+    ];
+    
+    commands.forEach(cmd => {
+        socket.on(cmd, (payload) => {
+            io.to('camera').emit(cmd, payload);
+        });
+    });
 
-  // WebRTC Signaling
-  socket.on('offer', (payload) => {
-    io.to('remote').emit('offer', payload);
-  });
+    // Updates (Camera -> Remote)
+    socket.on('camera-state', (state) => io.to('remote').emit('camera-state', state));
+    socket.on('camera-devices', (devices) => io.to('remote').emit('camera-devices', devices));
+    socket.on('camera-capabilities', (caps) => io.to('remote').emit('camera-capabilities', caps));
+    socket.on('camera-error', (msg) => io.to('remote').emit('camera-error', msg));
 
-  socket.on('answer', (payload) => {
-    io.to('camera').emit('answer', payload);
-  });
-
-  socket.on('ice-candidate', (incoming) => {
-    // Forward candidate to the "other" party
-    // We need to know who sent it to send it to the right place
-    // A simple way is to broadcast to the room that isn't the sender, 
-    // or just rely on specific event names for direction.
-    // Let's use specific events for clarity given the strict roles.
-  });
-  
-  socket.on('camera-candidate', (candidate) => {
-      io.to('remote').emit('camera-candidate', candidate);
-  });
-  
-  socket.on('remote-candidate', (candidate) => {
-      io.to('camera').emit('remote-candidate', candidate);
-  });
-
-  // Camera status updates
-  socket.on('camera-status', (status) => {
-    // status: 'standby', 'recording', 'saving'
-    io.to('remote').emit('status-update', status);
-  });
-  
-  socket.on('camera-capabilities', (caps) => {
-      io.to('remote').emit('camera-capabilities', caps);
-  });
-  
-  socket.on('camera-devices', (devices) => {
-      io.to('remote').emit('camera-devices', devices);
-  });
-
-  socket.on('get-devices', () => {
-      io.to('camera').emit('get-devices');
-  });
-
-  socket.on('switch-lens', (deviceId) => {
-      io.to('camera').emit('switch-lens', deviceId);
-  });
-  
-  // Remote triggers
-  socket.on('trigger-record', () => {
-    io.to('camera').emit('start-recording');
-  });
-
-  // Camera error updates
-  socket.on('camera-error', (errorMsg) => {
-      io.to('remote').emit('error-update', errorMsg);
-  });
-
-  socket.on('disconnect', () => {
-    // Client disconnected
-  });
+    socket.on('disconnect', () => {
+        log('Server', 'INFO', `Client Disconnected: ${socket.id}`);
+    });
 });
 
+// --- Start ---
 server.listen(PORT, '0.0.0.0', () => {
-  console.log('\n--- Server Started ---');
-  console.log(`Local Access:   https://localhost:${PORT}`);
-  console.log(`Network Access: https://${ip.address()}:${PORT}`);
-  console.log(`\nNote: You must accept the self-signed certificate warning in your browser.`);
+    log('System', 'INFO', `Server running at https://${ip.address()}:${PORT}`);
 });
