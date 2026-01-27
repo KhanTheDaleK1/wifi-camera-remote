@@ -1,0 +1,39 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>Camera</title>
+    <link rel="stylesheet" href="css/style.css">
+    <script>
+        // Aggressive Service Worker Killer
+        if ('serviceWorker' in navigator) {
+            navigator.serviceWorker.getRegistrations().then(regs => {
+                for(let r of regs) r.unregister();
+            }).catch(e => console.log('SW Clear Failed', e));
+        }
+    </script>
+</head>
+<body style="background: #000; color: #fff;">
+    <div id="start-screen" class="fill center col" style="position:fixed; z-index:100; background:#000;">
+        <h1>Camera Mode</h1>
+        <button id="start-btn" class="btn btn-primary" style="padding: 25px 50px; border-radius: 50px; font-size: 24px;">START CAMERA</button>
+        <p id="init-log" style="font-size: 10px; color: #555; margin-top: 20px;">Waiting for user...</p>
+    </div>
+
+    <video id="viewfinder" autoplay playsinline muted style="width:100vw; height:100vh; object-fit:cover;"></video>
+
+    <div id="camera-overlay" class="hidden">
+        <div class="status-bar" style="position:fixed; top:20px; left:50%; transform:translateX(-50%); background:rgba(0,0,0,0.6); padding:10px 20px; border-radius:30px; display:flex; align-items:center; gap:10px;">
+            <div id="rec-dot" class="rec-indicator"></div>
+            <span id="status-text">Ready</span>
+        </div>
+        <button id="dl-btn" class="btn hidden" style="position:fixed; bottom:40px; left:50%; transform:translateX(-50%); background:#fff; color:#000;">SAVE VIDEO</button>
+    </div>
+
+    <!-- Use CDN for absolute reliability on iPhone -->
+    <script src="https://cdn.socket.io/4.7.2/socket.io.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/nosleep/0.12.0/NoSleep.min.js"></script>
+    <script src="js/camera.js"></script>
+</body>
+</html>
