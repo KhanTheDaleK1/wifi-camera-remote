@@ -1,4 +1,6 @@
 const socket = io();
+setupRemoteLogging(socket, 'Remote');
+
 const remoteView = document.getElementById('remote-view');
 const statusDisplay = document.getElementById('status-display');
 const shutterBtn = document.getElementById('shutter-btn');
@@ -11,12 +13,10 @@ const fpsSelect = document.getElementById('framerate-select');
 const lensSelect = document.getElementById('lens-select');
 const exposureSlider = document.getElementById('exposure-slider');
 const focusSlider = document.getElementById('focus-slider');
-const remoteDownloadCheck = document.getElementById('remote-download-check');
 
 let peerConnection;
 let isRecording = false;
 let torchState = false;
-let recordedChunks = [];
 
 // WebRTC Configuration
 const rtcConfig = {
@@ -33,11 +33,7 @@ socket.emit('get-devices');
 
 shutterBtn.addEventListener('click', () => {
     if (!isRecording) {
-        // Clear previous recording data
-        recordedChunks = [];
-        
-        const saveToRemote = remoteDownloadCheck.checked;
-        socket.emit('trigger-record', { saveToRemote });
+        socket.emit('trigger-record');
     } else {
         socket.emit('trigger-stop');
     }
@@ -81,39 +77,6 @@ resSelect.addEventListener('change', () => {
 
 fpsSelect.addEventListener('change', () => {
     socket.emit('control-camera', { frameRate: fpsSelect.value });
-});
-
-// --- Remote Download Logic ---
-
-socket.on('video-chunk', (chunk) => {
-    // Collect chunks if we are downloading
-    if (isRecording) {
-        recordedChunks.push(chunk);
-    }
-});
-
-socket.on('download-ready', () => {
-    if (recordedChunks.length === 0) return;
-    
-    const blob = new Blob(recordedChunks, { type: 'video/mp4' }); // Assuming MP4/WebM
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = `remote_rec_${Date.now()}.mp4`;
-    document.body.appendChild(a);
-    a.click();
-    document.body.removeChild(a);
-    
-    // Cleanup
-    recordedChunks = [];
-    
-    // Feedback
-    statusDisplay.innerText = 'File Saved to Mac';
-    statusDisplay.style.color = 'var(--accent-blue)';
-    setTimeout(() => {
-        statusDisplay.innerText = 'Ready';
-        statusDisplay.style.color = 'var(--accent-green)';
-    }, 3000);
 });
 
 // --- WebRTC Logic ---

@@ -8,6 +8,22 @@ const QRCode = require('qrcode');
 
 const app = express();
 const PORT = 3000;
+const LOG_FILE = path.join(__dirname, 'debug.log');
+
+// Logger Utility
+function log(source, level, message) {
+    const timestamp = new Date().toISOString();
+    const logLine = `[${timestamp}] [${source}] [${level}] ${message}\n`;
+    
+    // Write to file
+    fs.appendFile(LOG_FILE, logLine, (err) => {
+        if (err) console.error('Log write failed:', err);
+    });
+    
+    // Write to console
+    const color = level === 'ERROR' || level === 'FATAL' ? '\x1b[31m' : '\x1b[32m'; // Red or Green
+    console.log(`${color}${logLine.trim()}\x1b[0m`);
+}
 
 const server = https.createServer({
   key: fs.readFileSync('key.pem'),
@@ -20,11 +36,21 @@ const networkUrl = `https://${ip.address()}:${PORT}/camera.html`;
 
 // Endpoints
 app.get('/network-info', async (req, res) => {
+    log('Server', 'INFO', `Request to /network-info from ${req.ip}`);
     try {
         const qrDataUrl = await QRCode.toDataURL(networkUrl);
         res.json({ url: networkUrl, qr: qrDataUrl });
     } catch (err) {
+        log('Server', 'ERROR', `QR Gen Error: ${err.message}`);
         res.status(500).send(err);
+    }
+});
+
+app.get('/logs', (req, res) => {
+    if (fs.existsSync(LOG_FILE)) {
+        res.sendFile(LOG_FILE);
+    } else {
+        res.send('No logs yet.');
     }
 });
 
@@ -34,6 +60,12 @@ app.use('/node_modules', express.static(path.join(__dirname, 'node_modules')));
 
 // Socket.io connection handling
 io.on('connection', (socket) => {
+  log('Server', 'INFO', `New Socket Connection: ${socket.id}`);
+
+  // Handle Client Logs
+  socket.on('client-log', (data) => {
+      log(data.source || 'Client', data.level || 'INFO', data.message);
+  });
   
   socket.on('join-camera', () => {
     socket.join('camera');
@@ -110,18 +142,9 @@ io.on('connection', (socket) => {
       io.to('camera').emit('switch-lens', deviceId);
   });
   
-  // Remote Download Streaming
-  socket.on('video-chunk', (chunk) => {
-      io.to('remote').emit('video-chunk', chunk);
-  });
-  
-  socket.on('download-ready', () => {
-      io.to('remote').emit('download-ready');
-  });
-
   // Remote triggers
-  socket.on('trigger-record', (options) => {
-    io.to('camera').emit('start-recording', options);
+  socket.on('trigger-record', () => {
+    io.to('camera').emit('start-recording');
   });
 
   // Camera error updates

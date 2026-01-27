@@ -1,4 +1,6 @@
 const socket = io();
+setupRemoteLogging(socket, 'Camera');
+
 const viewfinder = document.getElementById('viewfinder');
 const statusText = document.getElementById('status-text');
 const recDot = document.getElementById('rec-dot');
@@ -34,24 +36,42 @@ async function initCamera(specificDeviceId = null) {
 
         const constraints = {
             audio: true,
-            video: {
-                width: { ideal: 1280 },
-                height: { ideal: 720 }
-            }
+            video: {}
         };
 
         if (specificDeviceId) {
             constraints.video.deviceId = { exact: specificDeviceId };
         } else {
-            constraints.video.facingMode = currentFacingMode;
+            // Default to environment if not specified
+            constraints.video.facingMode = currentFacingMode || 'environment';
         }
         
         stream = await navigator.mediaDevices.getUserMedia(constraints);
         viewfinder.srcObject = stream;
         
+        // Force play
+        try {
+            await viewfinder.play();
+        } catch (playErr) {
+            updateStatus('Play Error: ' + playErr.message);
+        }
+        
         // Get video track for capabilities
         const videoTrack = stream.getVideoTracks()[0];
         track = videoTrack;
+        
+        // Debug Info
+        const settings = videoTrack.getSettings();
+        const debugText = `Cam: ${settings.deviceId ? settings.deviceId.substr(0,4) : 'Def'} | Res: ${settings.width}x${settings.height} | State: ${videoTrack.readyState}`;
+        console.log(debugText); // Keep for remote debug if needed
+        
+        // Append to status for visibility
+        updateStatus('Standby');
+        const debugEl = document.createElement('div');
+        debugEl.style.fontSize = '10px';
+        debugEl.style.color = '#555';
+        debugEl.innerText = debugText;
+        document.querySelector('.status-overlay').appendChild(debugEl);
         
         // Broadcast capabilities
         let capabilities = {};
@@ -142,12 +162,9 @@ socket.on('remote-candidate', async (candidate) => {
 
 
 // Recording Logic
-let saveToRemote = false;
-
-function startRecording(options = {}) {
+function startRecording() {
     if (!stream) return;
     
-    saveToRemote = !!options.saveToRemote;
     recordedChunks = [];
     const mimeTypes = ['video/webm;codecs=vp8,opus', 'video/mp4', 'video/webm'];
     let options = {};
@@ -165,12 +182,7 @@ function startRecording(options = {}) {
     }
 
     mediaRecorder.ondataavailable = (event) => {
-        if (event.data.size > 0) {
-            recordedChunks.push(event.data);
-            if (saveToRemote) {
-                socket.emit('video-chunk', event.data);
-            }
-        }
+        if (event.data.size > 0) recordedChunks.push(event.data);
     };
 
     mediaRecorder.onstop = saveVideo;
@@ -190,10 +202,6 @@ function stopRecording() {
         updateStatus('Saving...');
         recDot.classList.remove('active');
         socket.emit('camera-status', 'saving');
-        
-        if (saveToRemote) {
-            socket.emit('download-ready');
-        }
     }
 }
 

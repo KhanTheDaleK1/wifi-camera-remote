@@ -46,13 +46,29 @@
             <span id="status-text">Standby</span>
         </div>
 
-        <div class="camera-ui">
-            <a id="download-btn" href="#">Tap to Save Video</a>
+            <div class="camera-ui">
+                <button id="reset-btn" style="position: absolute; top: -500px; left: 20px; background: rgba(0,0,0,0.5); color: white; border: 1px solid white; padding: 5px; border-radius: 5px; pointer-events: auto;">Reset App</button>
+                <a id="download-btn" href="#">Tap to Save Video</a>
+            </div>
+            
+            <script>
+                // Make reset button visible if tapped in top left corner (hidden area hack) or just visible for now
+                document.getElementById('reset-btn').style.top = '40px'; 
+                
+                document.getElementById('reset-btn').addEventListener('click', async () => {
+                     if ('serviceWorker' in navigator) {
+                        const registrations = await navigator.serviceWorker.getRegistrations();
+                        for(let registration of registrations) {
+                            await registration.unregister();
+                        }
+                     }
+                     window.location.reload(true);
+                });
+            </script>
         </div>
-    </div>
-
-    <script src="/node_modules/nosleep.js/dist/NoSleep.min.js"></script>
-    <script src="/socket.io/socket.io.js"></script>
+        
+            <script src="/node_modules/nosleep.js/dist/NoSleep.min.js"></script>    <script src="/socket.io/socket.io.js"></script>
+    <script src="js/logging.js"></script>
     <script src="js/camera.js"></script>
     <script>
         if ('serviceWorker' in navigator) {

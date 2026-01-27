@@ -1,4 +1,4 @@
-const CACHE_NAME = 'camera-remote-v1';
+const CACHE_NAME = 'camera-remote-v2';
 const ASSETS = [
   '/',
   '/index.html',
