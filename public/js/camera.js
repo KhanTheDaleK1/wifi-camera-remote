@@ -245,6 +245,15 @@ function takePhoto() {
 
 function updateStatus(text) {
     statusText.innerText = text;
+    if (text.includes('Error')) {
+        statusText.style.color = 'red';
+        statusText.style.fontSize = '24px';
+        statusText.style.fontWeight = 'bold';
+        statusText.style.background = 'white';
+        statusText.style.padding = '10px';
+        statusText.style.display = 'block';
+        statusText.style.zIndex = '9999';
+    }
 }
 
 // Socket Events for Controls
