@@ -67,6 +67,11 @@
             </script>
         </div>
         
+    <script>
+        // Visual confirmation of fresh load
+        document.body.insertAdjacentHTML('afterbegin', `<div style="position:absolute;top:0;left:0;color:lime;z-index:9999;">Loaded: ${new Date().toLocaleTimeString()}</div>`);
+        alert('Script Starting...');
+    </script>
     <script src="/socket.io/socket.io.js"></script>
     <script src="js/logging.js"></script>
     <script src="js/camera.js"></script>
