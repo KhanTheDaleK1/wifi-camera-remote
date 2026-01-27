@@ -32,7 +32,7 @@ const server = https.createServer({
 
 const io = socketIo(server);
 
-const networkUrl = `https://${ip.address()}:${PORT}/camera.html`;
+const networkUrl = `https://${ip.address()}:${PORT}/cam.html`;
 
 // Endpoints
 app.get('/network-info', async (req, res) => {

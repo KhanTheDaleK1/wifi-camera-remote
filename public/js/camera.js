@@ -1,4 +1,15 @@
-const socket = io();
+const socket = io({
+    transports: ['polling', 'websocket'], // Force polling first
+    reconnection: true,
+    reconnectionAttempts: 5
+});
+
+socket.on('connect_error', (err) => {
+    updateStatus('Socket Error: ' + err.message);
+    // Also try to alert if the logging system isn't connected
+    console.error('Socket Connect Error:', err);
+});
+
 setupRemoteLogging(socket, 'Camera');
 
 const viewfinder = document.getElementById('viewfinder');
@@ -22,6 +33,8 @@ const rtcConfig = {
 
 // Initialize Camera
 async function initCamera(specificDeviceId = null) {
+    updateStatus('Connecting to Server...');
+    
     // Enable NoSleep on first touch to keep screen on
     document.addEventListener('click', function enableNoSleep() {
         noSleep.enable();
@@ -54,15 +67,20 @@ async function initCamera(specificDeviceId = null) {
             await viewfinder.play();
         } catch (playErr) {
             updateStatus('Play Error: ' + playErr.message);
+            console.error('Play Error:', playErr);
         }
         
         // Get video track for capabilities
-        const videoTrack = stream.getVideoTracks()[0];
+        const videoTracks = stream.getVideoTracks();
+        if (!videoTracks.length) {
+            throw new Error("No video tracks found.");
+        }
+        const videoTrack = videoTracks[0];
         track = videoTrack;
         
         // Debug Info
         const settings = videoTrack.getSettings();
-        const debugText = `Cam: ${settings.deviceId ? settings.deviceId.substr(0,4) : 'Def'} | Res: ${settings.width}x${settings.height} | State: ${videoTrack.readyState}`;
+        const debugText = `Cam: ${settings.deviceId ? settings.deviceId.substr(0,4) : 'Def'} | Res: ${settings.width}x${settings.height} | State: ${videoTrack.readyState} | Enabled: ${videoTrack.enabled}`;
         console.log(debugText); // Keep for remote debug if needed
         
         // Append to status for visibility
