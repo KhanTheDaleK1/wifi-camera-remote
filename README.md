@@ -1,5 +1,8 @@
 # WiFi Camera Remote (Studio Edition)
 
+> [!CAUTION]
+> **Alpha Testing Stage:** This software is currently in active development. Features may change, and you may encounter bugs. Please report issues to help improve the system.
+
 Turn your smartphones AND USB webcams into high-quality, wireless studio cameras with professional controls, ASMR-ready audio, and a **Multi-Camera Switcher** for OBS.
 
 ## Key Features
