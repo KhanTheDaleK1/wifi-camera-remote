@@ -27,6 +27,13 @@ let tetherState = false;
 let audioState = false; // false = voice, true = pro
 let trackMode = 'off';
 
+// Check URL params for target camera
+const urlParams = new URLSearchParams(window.location.search);
+const targetCamId = urlParams.get('cam');
+if (targetCamId) {
+    console.log(`[Remote] Auto-targeting camera: ${targetCamId}`);
+}
+
 // --- UI Interaction ---
 els.btn.onclick = () => {
     els.start.classList.add('hidden');
@@ -56,12 +63,31 @@ socket.on('camera-list', (cameras) => {
     els.camSelect.innerHTML = cameras.map(c => `<option value="${c.id}">${c.meta.name || c.id.substr(0,4)}</option>`).join('');
     
     if (cameras.length > 0) {
-        if (savedId && cameras.find(c => c.id === savedId)) {
+        // Priority 1: URL Parameter (First load)
+        if (targetCamId && cameras.find(c => c.id === targetCamId)) {
+             if (activeCamId !== targetCamId) {
+                 activeCamId = targetCamId;
+                 els.camSelect.value = activeCamId;
+                 connectToCamera(activeCamId);
+                 
+                 // Auto-hide start screen if deep-linked
+                 if (!els.start.classList.contains('hidden')) {
+                     els.start.classList.add('hidden');
+                     els.video.play().catch(() => {});
+                 }
+             }
+        }
+        // Priority 2: Restore previous selection
+        else if (savedId && cameras.find(c => c.id === savedId)) {
             els.camSelect.value = savedId;
-        } else {
-            activeCamId = cameras[0].id;
-            els.camSelect.value = activeCamId;
-            connectToCamera(activeCamId);
+        } 
+        // Priority 3: Default to first
+        else {
+            if (!activeCamId) { // Only change if we have nothing selected
+                activeCamId = cameras[0].id;
+                els.camSelect.value = activeCamId;
+                connectToCamera(activeCamId);
+            }
         }
     } else {
         els.camSelect.innerHTML = '<option>No Cameras</option>';

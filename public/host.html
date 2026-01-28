@@ -10,8 +10,11 @@
         .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(400px, 1fr)); gap: 20px; }
         .cam-card { background: #111; border: 1px solid #333; border-radius: 10px; overflow: hidden; display: flex; flex-direction: column; }
         .cam-header { background: #222; padding: 10px; display: flex; justify-content: space-between; align-items: center; }
-        .cam-preview { width: 100%; aspect-ratio: 16/9; background: #000; position: relative; }
-        video { width: 100%; height: 100%; object-fit: cover; }
+        .cam-preview { width: 100%; aspect-ratio: 16/9; background: #000; position: relative; cursor: pointer; transition: opacity 0.2s; }
+        .cam-preview:hover { opacity: 0.9; }
+        .cam-preview::after { content: '🔗 Open Remote'; position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); color: white; background: rgba(0,0,0,0.7); padding: 8px 12px; border-radius: 4px; opacity: 0; pointer-events: none; transition: opacity 0.2s; }
+        .cam-preview:hover::after { opacity: 1; }
+        video { width: 100%; height: 100%; object-fit: cover; pointer-events: none; }
         .status-overlay { position: absolute; bottom: 10px; left: 10px; background: rgba(0,0,0,0.7); padding: 4px 8px; border-radius: 4px; font-size: 12px; }
         .rec-dot { width: 10px; height: 10px; background: #555; border-radius: 50%; display: inline-block; margin-right: 5px; }
         .rec-dot.active { background: red; animation: pulse 1s infinite; }
@@ -25,6 +28,7 @@
         <div>
             <button class="btn btn-primary" onclick="scanDevices()">Rescan Devices</button>
             <button class="btn" onclick="startAll()">Start All</button>
+            <a href="remote.html" class="btn" target="_blank" style="text-decoration:none;">Open Main Remote</a>
         </div>
     </div>
 
@@ -70,7 +74,7 @@
                     <span style="font-weight:bold;">${name}</span>
                     <span class="status-badge">Ready</span>
                 </div>
-                <div class="cam-preview">
+                <div class="cam-preview" onclick="openRemote('${id}')">
                     <video id="vid-${id}" autoplay muted playsinline></video>
                     <div class="status-overlay">
                         <div id="rec-${id}" class="rec-dot"></div>
@@ -92,10 +96,23 @@
             // ForceNew=true ensures a unique socket for this camera
             const socket = io({ forceNew: true, transports: ['polling'] });
             
+            // We need to fetch the socket ID once it connects to know what ID to pass to the remote
+            // The camera core emits 'join-camera', we can grab the socket id from the instance
+            
             const session = new CameraSession(socket, videoEl, statusEl, recEl, name);
             
             // Store session
             sessions.push({ id, session, btn: btnEl, active: false });
+        }
+
+        function openRemote(deviceId) {
+            const item = sessions.find(s => s.id === deviceId);
+            if (item && item.session.socket.id) {
+                const socketId = item.session.socket.id;
+                window.open(`remote.html?cam=${socketId}`, '_blank');
+            } else {
+                alert("Please start the camera first.");
+            }
         }
 
         async function toggleCamera(id) {
