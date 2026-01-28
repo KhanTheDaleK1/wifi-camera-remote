@@ -6,6 +6,7 @@ const http = require('http');
 const socketIo = require('socket.io');
 const ip = require('ip');
 const QRCode = require('qrcode');
+const androidLauncher = require('./android-launcher');
 
 const PORT = 3001;
 const HTTP_PORT = 3002;
@@ -190,6 +191,10 @@ const os = require('os');
 server.listen(PORT, '0.0.0.0', () => {
     console.log(`\n--- HTTPS Server Running ---`);
     console.log(`Port: ${PORT}`);
+    
+    // Start Android Auto-Launcher
+    androidLauncher.start();
+
     console.log(`Available Networks:`);
     
     const interfaces = os.networkInterfaces();
