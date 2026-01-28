@@ -46,6 +46,16 @@
             <label for="audio-check" style="flex-grow: 1; margin-left: 8px; color: #aaa;">Pro Audio (No Noise Suppression)</label>
         </div>
 
+        <div class="row" style="background: #222; padding: 4px; border-radius: 4px;">
+            <label for="track-select" style="flex-grow: 0; margin-right: 8px; color: #aaa;">AI Track:</label>
+            <select id="track-select" style="flex-grow: 1;">
+                <option value="off" selected>OFF</option>
+                <option value="face">Face</option>
+                <option value="body">Body</option>
+                <option value="object">Object</option>
+            </select>
+        </div>
+
         <div class="row">
             <select id="lens-select"><option value="">Lenses...</option></select>
             <button id="torch-btn" style="flex-grow: 0; width: 30px;">⚡</button>
@@ -109,7 +119,8 @@
             fps: document.getElementById('fps-select'),
             bitrate: document.getElementById('bitrate-select'),
             tether: document.getElementById('tether-check'),
-            audio: document.getElementById('audio-check')
+            audio: document.getElementById('audio-check'),
+            track: document.getElementById('track-select')
         };
 
         let recording = false;
@@ -191,6 +202,7 @@
         els.photoBtn.onclick = () => sendCmd('take-photo');
         els.tether.onchange = () => sendCmd('set-tether', els.tether.checked);
         els.audio.onchange = () => sendCmd('set-audio-mode', els.audio.checked ? 'pro' : 'voice');
+        els.track.onchange = () => sendCmd('set-track-mode', els.track.value);
         
         els.lens.onchange = () => sendCmd('switch-lens', els.lens.value);
         

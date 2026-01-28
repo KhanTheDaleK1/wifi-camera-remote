@@ -17,13 +17,15 @@ const els = {
     fps: document.getElementById('fps-select'),
     camSelect: document.getElementById('cam-select'),
     tetherBtn: document.getElementById('tether-btn'),
-    audioBtn: document.getElementById('audio-btn')
+    audioBtn: document.getElementById('audio-btn'),
+    trackSelect: document.getElementById('track-select')
 };
 
 let peer, recording = false, torchState = false;
 let activeCamId = null;
 let tetherState = false;
 let audioState = false; // false = voice, true = pro
+let trackMode = 'off';
 
 // --- UI Interaction ---
 els.btn.onclick = () => {
@@ -81,6 +83,7 @@ function connectToCamera(id) {
     // Restore states
     sendCmd('set-tether', tetherState);
     sendCmd('set-audio-mode', audioState ? 'pro' : 'voice');
+    sendCmd('set-track-mode', trackMode);
 }
 
 // --- WebRTC Logic (Multi-Cam Aware) ---
@@ -146,6 +149,11 @@ els.audioBtn.onclick = () => {
     els.audioBtn.innerText = audioState ? "MIC: PRO" : "MIC: VOICE";
     els.audioBtn.style.background = audioState ? "#0a84ff" : "#333";
     sendCmd('set-audio-mode', audioState ? 'pro' : 'voice');
+};
+
+els.trackSelect.onchange = () => {
+    trackMode = els.trackSelect.value;
+    sendCmd('set-track-mode', trackMode);
 };
 
 els.lensSelect.onchange = () => sendCmd('switch-lens', els.lensSelect.value);

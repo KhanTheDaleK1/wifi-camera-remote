@@ -130,14 +130,167 @@ class UploadManager {
 
 const uploader = new UploadManager(socket);
 
+// --- AI Smart Tracker (Multi-Mode) ---
+class SmartTracker {
+    constructor() {
+        this.models = { face: null, object: null };
+        this.mode = 'off'; // off, face, body, object
+        
+        this.canvas = document.createElement('canvas');
+        this.ctx = this.canvas.getContext('2d');
+        this.isActive = false;
+        this.animationId = null;
+        
+        // Virtual Camera State
+        this.vCam = { x: 0, y: 0, w: 1920, h: 1080 };
+        this.target = { x: 0, y: 0, w: 1920, h: 1080 };
+        
+        this.lerpFactor = 0.05;
+        this.padding = 0.4;
+        this.noDetectionFrames = 0;
+    }
+
+    async load() {
+        if (!this.models.face && window.blazeface) {
+            console.log("Tracker: Loading Face Model...");
+            this.models.face = await blazeface.load();
+        }
+        if (!this.models.object && window.cocoSsd) {
+            console.log("Tracker: Loading Object Model...");
+            this.models.object = await cocoSsd.load({ base: 'lite_mobilenet_v2' });
+        }
+        console.log("Tracker: Models Ready");
+    }
+
+    setMode(mode) {
+        this.mode = mode;
+        console.log(`Tracker: Mode set to ${mode}`);
+    }
+
+    start(videoEl, originalStream) {
+        if (this.mode === 'off') return originalStream;
+        
+        this.isActive = true;
+        this.video = videoEl;
+        
+        const settings = originalStream.getVideoTracks()[0].getSettings();
+        this.canvas.width = settings.width || 1920;
+        this.canvas.height = settings.height || 1080;
+        
+        this.vCam = { x: 0, y: 0, w: this.canvas.width, h: this.canvas.height };
+        this.target = { ...this.vCam };
+
+        this.loop();
+        
+        const fps = settings.frameRate || 30;
+        return this.canvas.captureStream(fps);
+    }
+
+    stop() {
+        this.isActive = false;
+        if (this.animationId) cancelAnimationFrame(this.animationId);
+    }
+
+    async loop() {
+        if (!this.isActive) return;
+
+        let detectedBox = null;
+
+        // --- Detection Logic ---
+        if (this.mode === 'face' && this.models.face) {
+            try {
+                const faces = await this.models.face.estimateFaces(this.video, false);
+                if (faces.length > 0) {
+                    // Combine all faces
+                    let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+                    faces.forEach(f => {
+                        const s = f.topLeft; const e = f.bottomRight;
+                        minX = Math.min(minX, s[0]); minY = Math.min(minY, s[1]);
+                        maxX = Math.max(maxX, e[0]); maxY = Math.max(maxY, e[1]);
+                    });
+                    detectedBox = { x: minX, y: minY, w: maxX - minX, h: maxY - minY };
+                }
+            } catch (e) {}
+        } 
+        else if ((this.mode === 'body' || this.mode === 'object') && this.models.object) {
+            try {
+                const preds = await this.models.object.detect(this.video);
+                const candidates = preds.filter(p => p.score > 0.5);
+                
+                let target = null;
+                if (this.mode === 'body') {
+                    // Find largest person
+                    const people = candidates.filter(p => p.class === 'person');
+                    people.sort((a,b) => (b.bbox[2]*b.bbox[3]) - (a.bbox[2]*a.bbox[3]));
+                    if (people.length > 0) target = people[0];
+                } else { // 'object'
+                    // Find largest NON-person
+                    const objects = candidates.filter(p => p.class !== 'person');
+                    objects.sort((a,b) => (b.bbox[2]*b.bbox[3]) - (a.bbox[2]*a.bbox[3]));
+                    if (objects.length > 0) target = objects[0];
+                }
+
+                if (target) {
+                    const [x, y, w, h] = target.bbox;
+                    detectedBox = { x, y, w, h };
+                }
+            } catch (e) {}
+        }
+
+        // --- Target Calculation ---
+        if (detectedBox) {
+            this.noDetectionFrames = 0;
+            const { x, y, w, h } = detectedBox;
+            const cx = x + w/2;
+            const cy = y + h/2;
+
+            let targetH = h * (1 + this.padding * 2);
+            // Constraints
+            targetH = Math.max(targetH, this.canvas.height * 0.25); 
+            targetH = Math.min(targetH, this.canvas.height);
+
+            const aspect = this.canvas.width / this.canvas.height;
+            let targetW = targetH * aspect;
+            
+            let targetX = cx - targetW / 2;
+            let targetY = cy - targetH / 2;
+
+            // Clamp
+            targetX = Math.max(0, Math.min(targetX, this.canvas.width - targetW));
+            targetY = Math.max(0, Math.min(targetY, this.canvas.height - targetH));
+
+            this.target = { x: targetX, y: targetY, w: targetW, h: targetH };
+            this.lerpFactor = 0.08;
+        } else {
+            this.noDetectionFrames++;
+            if (this.noDetectionFrames > 45) {
+                this.target = { x: 0, y: 0, w: this.canvas.width, h: this.canvas.height };
+                this.lerpFactor = 0.03;
+            }
+        }
+
+        // --- Physics ---
+        this.vCam.x += (this.target.x - this.vCam.x) * this.lerpFactor;
+        this.vCam.y += (this.target.y - this.vCam.y) * this.lerpFactor;
+        this.vCam.w += (this.target.w - this.vCam.w) * this.lerpFactor;
+        this.vCam.h += (this.target.h - this.vCam.h) * this.lerpFactor;
+
+        this.ctx.drawImage(this.video, this.vCam.x, this.vCam.y, this.vCam.w, this.vCam.h, 0, 0, this.canvas.width, this.canvas.height);
+        this.animationId = requestAnimationFrame(() => this.loop());
+    }
+}
+
+const tracker = new SmartTracker();
+
 // Pro Settings State
 let currentSettings = {
     deviceId: null,
     resolution: 1080,
     fps: 30,
-    recordingBitrate: 250000000, // Default to Extreme (250 Mbps)
+    recordingBitrate: 250000000, 
     saveToHost: false,
-    proAudio: false
+    proAudio: false,
+    trackMode: 'off' // off, face, body, object
 };
 
 // --- Wake Lock ---
@@ -155,10 +308,13 @@ async function requestWakeLock() {
 // --- Connection Recovery ---
 socket.on('connect', () => {
     console.log('Socket Connected');
-    // Register with some metadata (Name/UserAgent)
+    // Register with some metadata
     const deviceName = navigator.userAgent.match(/\(([^)]+)\)/)[1] || 'Mobile Device';
     socket.emit('join-camera', { name: deviceName });
     
+    // Preload AI
+    tracker.load().catch(e => console.warn("AI Load Failed:", e));
+
     if (stream) {
         initRTC();
         socket.emit('camera-state', state === 'RECORDING' ? 'recording' : 'idle');
@@ -235,28 +391,33 @@ async function startCamera(updates = {}) {
         
         if (track.getCapabilities) {
             const caps = track.getCapabilities();
-            socket.emit('camera-capabilities', caps); // This goes to server -> remote room
+            socket.emit('camera-capabilities', caps); 
         }
         
-        initRTC();
+        // --- Auto-Tracking Interception ---
+        let finalStream = stream;
+        if (currentSettings.trackMode !== 'off') {
+             console.log(`Starting Tracker (${currentSettings.trackMode})...`);
+             tracker.setMode(currentSettings.trackMode);
+             finalStream = tracker.start(els.video, stream);
+        } else {
+             tracker.stop();
+        }
+
+        initRTC(finalStream); // Pass specific stream to RTC
     } catch (e) {
         console.error('Camera access failed:', e);
-        // Fallback to default if specific settings fail (e.g. 120fps not supported at 4K)
-        if (Object.keys(updates).length > 0) {
-            console.warn('Retrying with defaults...');
-            await startCamera({ resolution: 1080, fps: 30 });
-        }
-    }
+        // Fallback to default if specific settings fail
 }
 
 let audioCtx, gainNode, dest;
 
-function initRTC() {
+function initRTC(activeStream = stream) {
     if (peer) peer.close();
     peer = new RTCPeerConnection({ iceServers: [{ urls: 'stun:stun.l.google.com:19302' }] });
 
-    // Standard Audio/Video Track Addition (Original Behavior)
-    stream.getTracks().forEach(t => peer.addTrack(t, stream));
+    // Use the active stream (could be raw camera OR canvas stream)
+    activeStream.getTracks().forEach(t => peer.addTrack(t, activeStream));
 
     peer.oniceconnectionstatechange = () => {
         console.log('ICE Connection State:', peer.iceConnectionState);
@@ -434,6 +595,17 @@ socket.on('set-audio-mode', async (mode) => {
     socket.emit('log', { source: 'Camera', level: 'INFO', message: msg });
     
     // Restart stream to apply audio constraints
+    await startCamera();
+});
+
+socket.on('set-track-mode', async (mode) => {
+    if (currentSettings.trackMode === mode) return;
+    currentSettings.trackMode = mode;
+    
+    const msg = `Tracking: ${mode.toUpperCase()}`;
+    console.log(msg);
+    socket.emit('log', { source: 'Camera', level: 'INFO', message: msg });
+
     await startCamera();
 });
 

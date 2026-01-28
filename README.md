@@ -59,6 +59,12 @@ Toggle between two audio profiles:
 - **Voice Mode:** Optimizes for speech with Echo Cancellation and Noise Suppression (best for calls).
 - **Pro Mode:** Disables all processing for raw, high-fidelity audio (best for ASMR or professional mics).
 
+### AI Smart Tracking
+Select from three tracking modes to keep your subject in frame:
+- **Face:** Locks onto the subject's head. Ideal for "talking head" videos.
+- **Body:** Tracks the entire person. Good for standing presentations.
+- **Object:** Ignores people and locks onto the largest inanimate object (phone, product, tool). Perfect for hands-only demos.
+
 ### Hardware Tiers
 ...
 
