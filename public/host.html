@@ -1,0 +1,137 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Host Camera Hub</title>
+    <link rel="stylesheet" href="css/style.css">
+    <style>
+        body { overflow: auto; padding: 20px; }
+        .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(400px, 1fr)); gap: 20px; }
+        .cam-card { background: #111; border: 1px solid #333; border-radius: 10px; overflow: hidden; display: flex; flex-direction: column; }
+        .cam-header { background: #222; padding: 10px; display: flex; justify-content: space-between; align-items: center; }
+        .cam-preview { width: 100%; aspect-ratio: 16/9; background: #000; position: relative; }
+        video { width: 100%; height: 100%; object-fit: cover; }
+        .status-overlay { position: absolute; bottom: 10px; left: 10px; background: rgba(0,0,0,0.7); padding: 4px 8px; border-radius: 4px; font-size: 12px; }
+        .rec-dot { width: 10px; height: 10px; background: #555; border-radius: 50%; display: inline-block; margin-right: 5px; }
+        .rec-dot.active { background: red; animation: pulse 1s infinite; }
+        .cam-controls { padding: 10px; display: flex; gap: 10px; justify-content: flex-end; }
+        @keyframes pulse { 0% { opacity: 1; } 50% { opacity: 0.5; } 100% { opacity: 1; } }
+    </style>
+</head>
+<body>
+    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px;">
+        <h1>Host Camera Hub</h1>
+        <div>
+            <button class="btn btn-primary" onclick="scanDevices()">Rescan Devices</button>
+            <button class="btn" onclick="startAll()">Start All</button>
+        </div>
+    </div>
+
+    <div id="grid" class="grid">
+        <!-- Cards injected here -->
+    </div>
+
+    <script src="https://cdn.socket.io/4.7.2/socket.io.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs@3.11.0"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@tensorflow-models/blazeface@0.0.7"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@tensorflow-models/coco-ssd@2.2.2"></script>
+    <script src="js/camera-core.js"></script>
+
+    <script>
+        const grid = document.getElementById('grid');
+        const sessions = [];
+
+        async function scanDevices() {
+            grid.innerHTML = '';
+            sessions.length = 0; // Clear old sessions
+
+            const devs = await navigator.mediaDevices.enumerateDevices();
+            const videoInputs = devs.filter(d => d.kind === 'videoinput');
+
+            if (videoInputs.length === 0) {
+                grid.innerHTML = '<p>No cameras found.</p>';
+                return;
+            }
+
+            videoInputs.forEach((device, index) => {
+                createCard(device, index);
+            });
+        }
+
+        function createCard(device, index) {
+            const id = device.deviceId;
+            const name = device.label || `USB Camera ${index + 1}`;
+            
+            const card = document.createElement('div');
+            card.className = 'cam-card';
+            card.innerHTML = `
+                <div class="cam-header">
+                    <span style="font-weight:bold;">${name}</span>
+                    <span class="status-badge">Ready</span>
+                </div>
+                <div class="cam-preview">
+                    <video id="vid-${id}" autoplay muted playsinline></video>
+                    <div class="status-overlay">
+                        <div id="rec-${id}" class="rec-dot"></div>
+                        <span id="stat-${id}">IDLE</span>
+                    </div>
+                </div>
+                <div class="cam-controls">
+                    <button class="btn btn-sm" onclick="toggleCamera('${id}')" id="btn-${id}">Start</button>
+                </div>
+            `;
+            grid.appendChild(card);
+
+            // Initialize Session
+            const videoEl = card.querySelector('video');
+            const statusEl = card.querySelector(`#stat-${id}`);
+            const recEl = card.querySelector(`#rec-${id}`);
+            const btnEl = card.querySelector(`#btn-${id}`);
+
+            // ForceNew=true ensures a unique socket for this camera
+            const socket = io({ forceNew: true, transports: ['polling'] });
+            
+            const session = new CameraSession(socket, videoEl, statusEl, recEl, name);
+            
+            // Store session
+            sessions.push({ id, session, btn: btnEl, active: false });
+        }
+
+        async function toggleCamera(id) {
+            const item = sessions.find(s => s.id === id);
+            if (!item) return;
+
+            if (item.active) {
+                // Stop
+                // Currently CameraSession doesn't have a full 'stop' method that clears stream
+                // We'll just reload the page or impl a stop later. 
+                // For now, simpler to just allow starting.
+                alert("Already running. Refresh to stop.");
+            } else {
+                item.btn.innerText = "Scanning...";
+                item.btn.disabled = true;
+                
+                // Auto Detect Max Resolution
+                const maxRes = await item.session.probeMaxResolution(id);
+                console.log(`[${item.session.name}] Max Res: ${maxRes}p`);
+                
+                await item.session.start({ deviceId: id, resolution: maxRes });
+                
+                item.active = true;
+                item.btn.innerText = "Running";
+                item.btn.style.background = "#228b22";
+            }
+        }
+
+        function startAll() {
+            sessions.forEach(s => {
+                if (!s.active) toggleCamera(s.id);
+            });
+        }
+
+        // Auto scan on load
+        scanDevices();
+    </script>
+</body>
+</html>
