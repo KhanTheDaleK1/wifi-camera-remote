@@ -150,14 +150,27 @@ io.on('connection', (socket) => {
 });
 
 // Start Server
-const HOST_IP = process.env.HOST_IP || ip.address();
+const os = require('os');
 
 server.listen(PORT, '0.0.0.0', () => {
-    console.log(`HTTPS Server running at https://${HOST_IP}:${PORT}`);
+    console.log(`\n--- HTTPS Server Running ---`);
+    console.log(`Port: ${PORT}`);
+    console.log(`Available Networks:`);
+    
+    const interfaces = os.networkInterfaces();
+    Object.keys(interfaces).forEach((ifname) => {
+        interfaces[ifname].forEach((iface) => {
+            if ('IPv4' !== iface.family || iface.internal !== false) return;
+            // Highlight likely USB interfaces (often named rndis, eth, or en with 192.168.x.x)
+            const isUSB = ifname.toLowerCase().includes('rndis') || ifname.toLowerCase().includes('usb') || ifname.toLowerCase().includes('eth');
+            const label = isUSB ? " (Likely USB/Ethernet)" : "";
+            console.log(`  - ${ifname}: https://${iface.address}:${PORT} ${label}`);
+        });
+    });
+    console.log(`----------------------------\n`);
 });
 
 httpServer.listen(HTTP_PORT, '0.0.0.0', () => {
-    console.log(`HTTP Server running at http://${HOST_IP}:${HTTP_PORT}`);
-    console.log(`OBS Feed (HTTP): http://${HOST_IP}:${HTTP_PORT}/obs.html`);
-    console.log(`OBS Dock (HTTP): http://${HOST_IP}:${HTTP_PORT}/control.html`);
+    console.log(`HTTP Server running at port ${HTTP_PORT} (OBS/Control)`);
+    console.log(`OBS Feed: http://localhost:${HTTP_PORT}/obs.html`);
 });

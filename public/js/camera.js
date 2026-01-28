@@ -25,7 +25,8 @@ let currentSettings = {
     resolution: 1080,
     fps: 30,
     recordingBitrate: 250000000, // Default to Extreme (250 Mbps)
-    saveToHost: false
+    saveToHost: false,
+    proAudio: false
 };
 
 // --- Wake Lock ---
@@ -94,8 +95,15 @@ async function startCamera(updates = {}) {
 
     if (stream) stream.getTracks().forEach(t => t.stop());
 
+    const audioConstraints = currentSettings.proAudio ? {
+        echoCancellation: false,
+        noiseSuppression: false,
+        autoGainControl: false,
+        channelCount: 2
+    } : true;
+
     const constraints = {
-        audio: true, // Revert to standard processing (EC, NS, AGC enabled)
+        audio: audioConstraints,
         video: { 
             facingMode: currentSettings.deviceId ? undefined : 'environment',
             deviceId: currentSettings.deviceId ? { exact: currentSettings.deviceId } : undefined,
@@ -308,6 +316,20 @@ socket.on('set-tether', (enabled) => {
     const msg = enabled ? "Tethered Mode: ON (Files will save to host)" : "Tethered Mode: OFF (Files will save to device)";
     console.log(msg);
     socket.emit('log', { source: 'Camera', level: 'INFO', message: msg });
+});
+
+socket.on('set-audio-mode', async (mode) => {
+    // mode: 'voice' | 'pro'
+    const isPro = (mode === 'pro');
+    if (currentSettings.proAudio === isPro) return;
+
+    currentSettings.proAudio = isPro;
+    const msg = isPro ? "Audio: Pro Mode (Raw/High-Fi)" : "Audio: Voice Mode (Echo Cancel/Noise Supp)";
+    console.log(msg);
+    socket.emit('log', { source: 'Camera', level: 'INFO', message: msg });
+    
+    // Restart stream to apply audio constraints
+    await startCamera();
 });
 
 socket.on('stop-recording', () => {

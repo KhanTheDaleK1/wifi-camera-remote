@@ -41,6 +41,11 @@
             <label for="tether-check" style="flex-grow: 1; margin-left: 8px; color: #aaa;">Tethered Mode (Save to Host)</label>
         </div>
 
+        <div class="row" style="background: #222; padding: 4px; border-radius: 4px;">
+            <input type="checkbox" id="audio-check" style="width: 20px; height: 20px; flex-grow: 0;">
+            <label for="audio-check" style="flex-grow: 1; margin-left: 8px; color: #aaa;">Pro Audio (No Noise Suppression)</label>
+        </div>
+
         <div class="row">
             <select id="lens-select"><option value="">Lenses...</option></select>
             <button id="torch-btn" style="flex-grow: 0; width: 30px;">⚡</button>
@@ -103,7 +108,8 @@
             res: document.getElementById('res-select'),
             fps: document.getElementById('fps-select'),
             bitrate: document.getElementById('bitrate-select'),
-            tether: document.getElementById('tether-check')
+            tether: document.getElementById('tether-check'),
+            audio: document.getElementById('audio-check')
         };
 
         let recording = false;
@@ -184,6 +190,7 @@
         els.recBtn.onclick = () => sendCmd(recording ? 'stop-recording' : 'start-recording');
         els.photoBtn.onclick = () => sendCmd('take-photo');
         els.tether.onchange = () => sendCmd('set-tether', els.tether.checked);
+        els.audio.onchange = () => sendCmd('set-audio-mode', els.audio.checked ? 'pro' : 'voice');
         
         els.lens.onchange = () => sendCmd('switch-lens', els.lens.value);
         

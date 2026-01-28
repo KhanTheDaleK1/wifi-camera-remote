@@ -16,12 +16,14 @@ const els = {
     res: document.getElementById('res-select'),
     fps: document.getElementById('fps-select'),
     camSelect: document.getElementById('cam-select'),
-    tetherBtn: document.getElementById('tether-btn')
+    tetherBtn: document.getElementById('tether-btn'),
+    audioBtn: document.getElementById('audio-btn')
 };
 
 let peer, recording = false, torchState = false;
 let activeCamId = null;
 let tetherState = false;
+let audioState = false; // false = voice, true = pro
 
 // --- UI Interaction ---
 els.btn.onclick = () => {
@@ -76,8 +78,9 @@ els.camSelect.onchange = () => {
 function connectToCamera(id) {
     if (peer) peer.close();
     socket.emit('request-state', { target: id });
-    // Restore tether state to new cam
+    // Restore states
     sendCmd('set-tether', tetherState);
+    sendCmd('set-audio-mode', audioState ? 'pro' : 'voice');
 }
 
 // --- WebRTC Logic (Multi-Cam Aware) ---
@@ -136,6 +139,13 @@ els.tetherBtn.onclick = () => {
     els.tetherBtn.innerText = tetherState ? "USB SAVE: ON" : "USB SAVE: OFF";
     els.tetherBtn.style.background = tetherState ? "#0a84ff" : "#333";
     sendCmd('set-tether', tetherState);
+};
+
+els.audioBtn.onclick = () => {
+    audioState = !audioState;
+    els.audioBtn.innerText = audioState ? "MIC: PRO" : "MIC: VOICE";
+    els.audioBtn.style.background = audioState ? "#0a84ff" : "#333";
+    sendCmd('set-audio-mode', audioState ? 'pro' : 'voice');
 };
 
 els.lensSelect.onchange = () => sendCmd('switch-lens', els.lensSelect.value);
