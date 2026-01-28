@@ -4,62 +4,57 @@ Turn your smartphone into a high-quality, wireless webcam with professional cont
 
 ## Key Features
 - **Multi-Camera Support:** Connect multiple phones and see them all in OBS simultaneously.
+- **USB Data Transfer:** Offload 4K recordings directly to your computer over a wired connection (Tethered Mode).
+- **USB Live Feed:** Use ADB port-forwarding or USB Tethering for ultra-low latency, interference-free video in OBS.
 - **Studio Controller:** Select which camera to control (Zoom, Focus, Lens) from a single dock.
-- **Smart Auto-Tuning:** Automatically detects device capabilities (iPhone 6 vs Pixel 9 Pro) and sets optimal resolution/bitrate to prevent overheating.
-- **ASMR Audio:** High-fidelity 320kbps audio with echo cancellation disabled for raw, natural sound.
+- **Smart Auto-Tuning:** Automatically detects device capabilities and sets optimal resolution/bitrate.
+- **Pro Audio:** Toggle between "Voice" (processing enabled) and "Pro" (raw/ASMR) audio modes.
 - **Extreme Quality:** Up to 4K resolution at 250 Mbps bitrate (on supported devices).
 
 ## Installation
-
-1.  **Clone the repository:**
-    ```bash
-    git clone https://github.com/KhanTheDaleK1/wifi-camera-remote.git
-    cd wifi-camera-remote
-    ```
-
-2.  **Install dependencies:**
-    ```bash
-    npm install
-    ```
-
-3.  **Generate SSL Certificates:**
-    ```bash
-    bash scripts/generate_cert.sh
-    ```
-
-4.  **Start the Server:**
-    ```bash
-    npm start
+...
     ```
     *   **HTTPS (Phones):** Port 3001
     *   **HTTP (OBS):** Port 3002
 
+## USB Connectivity (Recommended)
+For the most stable connection and highest data speeds, use a wired USB connection.
+
+### 1. Android (ADB Port Forwarding)
+The "Gold Standard" for reliability. Works even in Airplane Mode.
+1. Enable **USB Debugging** on your phone.
+2. Connect via USB and run:
+   ```bash
+   ./usb-connect.sh
+   ```
+3. Open `https://localhost:3001` on your phone's Chrome browser.
+
+### 2. iOS / Universal (USB Tethering)
+1. Connect via USB.
+2. Enable **Personal Hotspot (USB Only)** on iPhone or **USB Tethering** on Android.
+3. When you run `npm start`, look for the IP labeled `(Likely USB/Ethernet)`.
+4. Open that IP on your phone.
+
+### 3. Tethered File Offload
+Save 4K videos directly to your computer's hard drive:
+1. Enable **"USB SAVE"** (Remote) or **"Tethered Mode"** (Control).
+2. Record your video.
+3. Upon stopping, the file is automatically moved to the `recordings/` folder on your computer.
+
 ## Usage Guide
-
-### 1. Connect Cameras
-1.  Open the HTTPS URL (e.g., `https://192.168.1.X:3001`) on each phone.
-2.  Tap "Start Camera".
-3.  The system will auto-detect your hardware tier (Legacy, Standard, or Ultra) and tune the stream.
-
-### 2. OBS Setup (Studio Mode)
-1.  **Video Feed:**
-    *   Add a **Browser Source**.
-    *   URL: `http://localhost:3002/obs.html`
-    *   Size: `1920x1080` (or your canvas size).
-    *   *This single source will display a grid of all connected cameras.*
-2.  **Control Dock:**
-    *   Go to **Docks** -> **Custom Browser Docks...**
-    *   Name: `Studio Control`
+...
     *   URL: `http://localhost:3002/control.html`
     *   *Use the dropdown at the top to select which camera to control.*
 
 ## Advanced Features
 
+### Pro Audio Mode
+Toggle between two audio profiles:
+- **Voice Mode:** Optimizes for speech with Echo Cancellation and Noise Suppression (best for calls).
+- **Pro Mode:** Disables all processing for raw, high-fidelity audio (best for ASMR or professional mics).
+
 ### Hardware Tiers
-The app automatically assigns a tier based on your device's encoder capabilities:
-- **Legacy (H.264):** 720p @ 30fps (Safe for older phones)
-- **Standard (HEVC):** 1080p @ 60fps
-- **Ultra (AV1):** 4K @ 60fps (Pixel 9 Pro / High-End)
+...
 
 ### Thermal Protection
 If the device starts to throttle (encoder latency > 25ms), the system will log a warning and automatically downgrade the stream to 720p to preserve the connection.
