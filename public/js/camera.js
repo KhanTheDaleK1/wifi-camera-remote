@@ -19,6 +19,117 @@ let stream, recorder, peer, track;
 let chunks = [];
 let state = 'IDLE';
 
+// --- Robust Upload Manager ---
+class UploadManager {
+    constructor(socket) {
+        this.socket = socket;
+        this.queue = [];
+        this.isUploading = false;
+        this.fallbackMode = false;
+        this.filename = null;
+        this.totalSize = 0;
+    }
+
+    start(filename) {
+        this.filename = filename;
+        this.queue = [];
+        this.isUploading = false;
+        this.fallbackMode = false;
+        this.totalSize = 0;
+        
+        if (currentSettings.saveToHost && this.socket.connected) {
+            console.log("UploadManager: Starting Tethered Upload...");
+            this.socket.emit('start-upload', { filename }, (response) => {
+                if (!response || !response.success) {
+                    console.warn("UploadManager: Server rejected upload. Falling back to local.");
+                    this.fallbackMode = true;
+                    els.status.innerText = "REC (Local)";
+                } else {
+                    els.status.innerText = "REC (USB)";
+                }
+            });
+        } else {
+            this.fallbackMode = true; // Default to local if not enabled or disconnected
+        }
+    }
+
+    addChunk(chunk) {
+        this.queue.push(chunk);
+        this.totalSize += chunk.size;
+        
+        // If we are in tethered mode and not broken, try to upload
+        if (!this.fallbackMode && currentSettings.saveToHost) {
+            this.processQueue();
+        }
+    }
+
+    processQueue() {
+        if (this.isUploading || this.queue.length === 0 || this.fallbackMode) return;
+
+        this.isUploading = true;
+        const chunk = this.queue[0]; // Peek
+
+        // Send binary chunk
+        this.socket.emit('upload-chunk', chunk, (ack) => {
+            if (ack && ack.success) {
+                // Success: Remove chunk from queue
+                this.queue.shift();
+                this.isUploading = false;
+                // If more chunks, process next
+                if (this.queue.length > 0) this.processQueue();
+            } else {
+                // Failure: Trigger Fallback
+                console.error("UploadManager: Chunk upload failed. Switching to seamless fallback.");
+                this.triggerFallback();
+            }
+        });
+        
+        // Safety timeout in case server never acks (3s)
+        setTimeout(() => {
+            if (this.isUploading) {
+                 console.warn("UploadManager: Chunk Ack Timeout. Switching to fallback.");
+                 this.triggerFallback();
+            }
+        }, 3000);
+    }
+
+    triggerFallback() {
+        this.fallbackMode = true;
+        this.isUploading = false;
+        this.socket.emit('cancel-upload'); // Tell server we gave up
+        els.status.innerText = "REC (Fallback)";
+        socket.emit('log', { source: 'Camera', level: 'WARN', message: 'USB/Network drop detected. Saving locally.' });
+    }
+
+    async stop() {
+        if (!this.fallbackMode && currentSettings.saveToHost) {
+            // Wait for remaining queue?
+            if (this.queue.length > 0) {
+                 els.status.innerText = "Finishing...";
+                 // Try one last burst to clear queue
+                 // For now, simpler to just close. If queue > 0, we might want to warn or fallback.
+                 // In a perfect world, we await the queue drain. 
+                 // Here, if queue is backed up, we fallback to save the whole thing locally to be safe.
+            }
+            
+            if (this.queue.length === 0) {
+                this.socket.emit('end-upload');
+                els.status.innerText = "Saved to Host";
+                socket.emit('log', { source: 'Camera', level: 'SUCCESS', message: `Offloaded ${this.filename}` });
+                return true; // Handled by host
+            }
+        }
+        return false; // Needs local save
+    }
+    
+    getAllChunks() {
+        // Return everything for local saving (we kept 'chunks' array in global scope as backup anyway)
+        return chunks; 
+    }
+}
+
+const uploader = new UploadManager(socket);
+
 // Pro Settings State
 let currentSettings = {
     deviceId: null,
@@ -267,47 +378,41 @@ socket.on('start-recording', () => {
         console.warn('High bitrate failed, falling back to default options', e);
         recorder = new MediaRecorder(stream, { mimeType: mime });
     }
+    
+    // Start Upload Manager
+    const ext = mime.includes('mp4') ? 'mp4' : 'webm';
+    const filename = `vid_${Date.now()}.${ext}`;
+    uploader.start(filename);
 
-    recorder.ondataavailable = e => chunks.push(e.data);
-    recorder.onstop = async () => {
-        state = 'IDLE';
-        // Ensure extension matches container
-        const ext = mime.includes('mp4') ? 'mp4' : 'webm';
-        const blob = new Blob(chunks, { type: mime });
-        const filename = `vid_${Date.now()}.${ext}`;
-
-        // Option 1: Save to Host (Tethered Mode)
-        if (currentSettings.saveToHost) {
-            els.status.innerText = "Uploading...";
-            socket.emit('log', { source: 'Camera', level: 'INFO', message: 'Starting background upload...' });
-            
-            try {
-                const res = await fetch(`/upload?filename=${filename}`, {
-                    method: 'POST',
-                    body: blob
-                });
-                
-                if (res.ok) {
-                    els.status.innerText = "Saved to Host";
-                    socket.emit('log', { source: 'Camera', level: 'SUCCESS', message: `Offloaded ${filename} to host.` });
-                } else {
-                    throw new Error('Upload failed');
-                }
-            } catch (e) {
-                els.status.innerText = "Upload Error";
-                socket.emit('log', { source: 'Camera', level: 'ERROR', message: `Upload failed: ${e.message}. Saving locally.` });
-                triggerDownload(blob, filename); // Fallback
-            }
-        } 
-        // Option 2: Save Locally (Default)
-        else {
-            triggerDownload(blob, filename);
+    recorder.ondataavailable = e => {
+        if (e.data && e.data.size > 0) {
+            chunks.push(e.data); // Keep local backup always (RAM permitting)
+            uploader.addChunk(e.data); // Try to upload
         }
     };
-    recorder.start();
+    
+    recorder.onstop = async () => {
+        state = 'IDLE';
+        
+        // Finalize Upload
+        const hostSaved = await uploader.stop();
+        
+        if (!hostSaved) {
+            // Fallback: Save Locally
+            console.log("Saving locally (Fallback or Default)");
+            const blob = new Blob(chunks, { type: mime });
+            triggerDownload(blob, filename);
+        }
+        
+        chunks = []; // Clear memory
+    };
+    
+    // Request data every 1 second (1000ms) to create manageable chunks for streaming
+    recorder.start(1000); 
+    
     state = 'RECORDING';
     els.recDot.classList.add('active');
-    els.status.innerText = "REC";
+    els.status.innerText = currentSettings.saveToHost ? "REC (USB)" : "REC";
     socket.emit('camera-state', 'recording');
 });
 

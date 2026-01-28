@@ -39,7 +39,13 @@ The "Gold Standard" for reliability. Works even in Airplane Mode.
 Save 4K videos directly to your computer's hard drive:
 1. Enable **"USB SAVE"** (Remote) or **"Tethered Mode"** (Control).
 2. Record your video.
-3. Upon stopping, the file is automatically moved to the `recordings/` folder on your computer.
+3.  Upon stopping, the file is automatically moved to the `recordings/` folder on your computer.
+
+### 4. Fault-Tolerant Recording
+The system uses a "Smart Buffer" to ensure zero frame loss:
+- **Chunking:** Video is recorded in 1-second chunks and streamed immediately.
+- **Buffering:** If the connection slows down, chunks are queued in RAM.
+- **Auto-Fallback:** If the USB cable is unplugged or the network fails, the system automatically switches to **Local Storage Mode**, saving the full high-quality file to your phone at the end.
 
 ## Usage Guide
 ...

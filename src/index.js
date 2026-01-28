@@ -52,28 +52,63 @@ app.get('/network-info', async (req, res) => {
 const recDir = path.join(rootDir, 'recordings');
 if (!fs.existsSync(recDir)) fs.mkdirSync(recDir);
 
-app.post('/upload', (req, res) => {
-    const filename = req.query.filename || `rec_${Date.now()}.webm`;
-    const filePath = path.join(recDir, filename);
-    const writeStream = fs.createWriteStream(filePath);
-
-    console.log(`[Upload] Receiving: ${filename}`);
-
-    req.pipe(writeStream);
-
-    req.on('end', () => {
-        console.log(`[Upload] Completed: ${filename}`);
-        res.status(200).send('Upload Complete');
-    });
-
-    req.on('error', (err) => {
-        console.error(`[Upload] Error: ${err}`);
-        res.status(500).send('Upload Failed');
-    });
-});
+// Upload State Tracking
+const uploadStreams = new Map(); // socket.id -> { stream, filename }
 
 io.on('connection', (socket) => {
     console.log('[Server] Connected:', socket.id);
+
+    // --- Tethered Upload Handlers ---
+    socket.on('start-upload', ({ filename }, ack) => {
+        try {
+            const filePath = path.join(recDir, filename);
+            const stream = fs.createWriteStream(filePath);
+            uploadStreams.set(socket.id, { stream, filename });
+            console.log(`[Upload] Started streaming: ${filename}`);
+            if (ack) ack({ success: true });
+        } catch (e) {
+            console.error(`[Upload] Start failed: ${e.message}`);
+            if (ack) ack({ success: false, error: e.message });
+        }
+    });
+
+    socket.on('upload-chunk', (data, ack) => {
+        const active = uploadStreams.get(socket.id);
+        if (!active) {
+            if (ack) ack({ success: false, error: "No active stream" });
+            return;
+        }
+        
+        // Write chunk to disk
+        active.stream.write(data, (err) => {
+            if (err) {
+                console.error(`[Upload] Write error: ${err.message}`);
+                if (ack) ack({ success: false, error: err.message });
+            } else {
+                if (ack) ack({ success: true });
+            }
+        });
+    });
+
+    socket.on('end-upload', (data, ack) => {
+        const active = uploadStreams.get(socket.id);
+        if (active) {
+            active.stream.end();
+            console.log(`[Upload] Finished: ${active.filename}`);
+            uploadStreams.delete(socket.id);
+            if (ack) ack({ success: true });
+        }
+    });
+
+    socket.on('cancel-upload', () => {
+        const active = uploadStreams.get(socket.id);
+        if (active) {
+            active.stream.end();
+            console.warn(`[Upload] Cancelled/Aborted: ${active.filename}`);
+            // Optional: Delete partial file? For safety, we keep it.
+            uploadStreams.delete(socket.id);
+        }
+    });
 
     // Camera Registration
     socket.on('join-camera', (meta) => {
