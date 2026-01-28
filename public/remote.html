@@ -20,7 +20,7 @@
                     <option value="">Scan...</option>
                 </select>
             </div>
-            <div style="display:flex; gap:10px;">
+            <div class="header-right">
                 <button id="tether-btn" class="btn btn-sm">USB SAVE: OFF</button>
                 <button id="audio-btn" class="btn btn-sm">MIC: VOICE</button>
                 <select id="track-select" class="dark-select" style="width: 80px; padding: 4px; font-size: 10px;">
@@ -40,7 +40,7 @@
 
         <div class="controls">
             <div class="control-group">
-                <label>Settings</label>
+                <span class="section-label">Settings</span>
                 <div class="row">
                     <select id="lens-select" class="full-width"><option value="">Lens...</option></select>
                 </div>
@@ -52,7 +52,7 @@
             </div>
 
             <div class="control-group">
-                <label>Zoom <span id="zoom-val"></span></label>
+                <label for="zoom-slider">Zoom <span id="zoom-val"></span></label>
                 <div class="row">
                     <span class="icon">🔍</span>
                     <input type="range" id="zoom-slider" min="1" max="10" step="0.1" value="1">
@@ -60,7 +60,7 @@
             </div>
 
             <div class="control-group">
-                <label>Focus</label>
+                <label for="focus-slider">Focus</label>
                 <div class="row">
                     <span class="icon">🎯</span>
                     <input type="range" id="focus-slider" min="0" max="1" step="0.01" value="0.5">

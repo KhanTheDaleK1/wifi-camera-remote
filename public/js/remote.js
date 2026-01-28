@@ -172,7 +172,7 @@ els.tetherBtn.onclick = () => {
 
 els.audioBtn.onclick = () => {
     audioState = !audioState;
-    els.audioBtn.innerText = audioState ? "MIC: PRO" : "MIC: VOICE";
+    els.audioBtn.innerText = audioState ? "MIC: HI-FI" : "MIC: VOICE";
     els.audioBtn.style.background = audioState ? "#0a84ff" : "#333";
     sendCmd('set-audio-mode', audioState ? 'pro' : 'voice');
 };

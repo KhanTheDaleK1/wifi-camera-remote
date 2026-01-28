@@ -134,34 +134,52 @@ io.on('connection', (socket) => {
     });
 
     // Multi-Cam Signaling Routing
-    // Camera -> Remote: Wrap with ID
-    socket.on('offer', (payload) => {
-        io.to('remote').emit('offer', { from: socket.id, payload });
+    
+    // Camera -> Remote (Targeted Offer)
+    socket.on('offer', (data) => {
+        // data can be just payload (legacy broadcast) or { target, payload }
+        if (data.target) {
+            io.to(data.target).emit('offer', { from: socket.id, payload: data.payload });
+        } else {
+            io.to('remote').emit('offer', { from: socket.id, payload: data });
+        }
     });
     
-    socket.on('camera-candidate', (payload) => {
-        io.to('remote').emit('camera-candidate', { from: socket.id, payload });
+    socket.on('camera-candidate', (data) => {
+        if (data.target) {
+            io.to(data.target).emit('camera-candidate', { from: socket.id, payload: data.payload });
+        } else {
+            // Legacy broadcast (mostly unused now)
+            io.to('remote').emit('camera-candidate', { from: socket.id, payload: data });
+        }
     });
 
     // Remote -> Specific Camera
     socket.on('answer', (data) => {
         // data: { target: 'socket_id', payload: sdp }
-        io.to(data.target).emit('answer', data.payload);
+        // We need to tell the camera WHO sent the answer
+        io.to(data.target).emit('answer', { from: socket.id, payload: data.payload });
     });
 
     socket.on('remote-candidate', (data) => {
-        io.to(data.target).emit('remote-candidate', data.payload);
+        io.to(data.target).emit('remote-candidate', { from: socket.id, payload: data.payload });
     });
 
     // Targeted Commands (Remote -> Camera)
-    const cmds = ['start-recording', 'stop-recording', 'take-photo', 'switch-camera', 'switch-lens', 'control-camera', 'request-state', 'set-gain'];
+    const cmds = ['start-recording', 'stop-recording', 'take-photo', 'switch-camera', 'switch-lens', 'control-camera', 'request-state', 'set-gain', 'set-tether', 'set-audio-mode', 'set-track-mode'];
     cmds.forEach(cmd => {
         socket.on(cmd, (data) => {
-            // Check if data has a 'target' field, otherwise broadcast (legacy support)
+            const payload = (data && data.payload) ? data.payload : data;
+            const msg = { from: socket.id, payload: payload };
+            
             if (data && data.target) {
-                io.to(data.target).emit(cmd, data.payload);
+                if (data.target === 'all') {
+                    io.to('camera').emit(cmd, msg);
+                } else {
+                    io.to(data.target).emit(cmd, msg);
+                }
             } else {
-                io.to('camera').emit(cmd, data); // Legacy broadcast
+                io.to('camera').emit(cmd, msg); // Legacy
             }
         });
     });
@@ -173,6 +191,20 @@ io.on('connection', (socket) => {
     socket.on('camera-capabilities', (c) => io.to('remote').emit('camera-capabilities', { from: socket.id, payload: c }));
     socket.on('thermal-warning', (w) => io.to('remote').emit('thermal-warning', { from: socket.id, payload: w }));
     
+    // --- New: Video Switcher Logic ---
+    // 1. Thumbnails (Camera -> Docks)
+    socket.on('preview-frame', (frame) => {
+        // frame: base64 string
+        // Broadcast to 'remote' room (which includes the dock)
+        io.to('remote').emit('preview-frame', { from: socket.id, payload: frame });
+    });
+
+    // 2. Program Switcher (Dock -> OBS View)
+    socket.on('program-change', (targetId) => {
+        // targetId: 'grid' or specific socketId
+        io.emit('program-change', targetId); // Broadcast to everyone (OBS View listens)
+    });
+
     socket.on('log', (data) => {
         console.log(`[${data.source}] [${data.level}] ${data.message}`);
     });

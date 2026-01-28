@@ -54,10 +54,10 @@ The system uses a "Smart Buffer" to ensure zero frame loss:
 
 ## Advanced Features
 
-### Pro Audio Mode
+### Audio Modes
 Toggle between two audio profiles:
 - **Voice Mode:** Optimizes for speech with Echo Cancellation and Noise Suppression (best for calls).
-- **Pro Mode:** Disables all processing for raw, high-fidelity audio (best for ASMR or professional mics).
+- **High Fidelity:** Disables all processing for raw, high-fidelity audio (best for ASMR, music, or professional mics).
 
 ### AI Smart Tracking
 Select from three tracking modes to keep your subject in frame:

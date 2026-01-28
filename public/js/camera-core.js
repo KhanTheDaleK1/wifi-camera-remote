@@ -8,7 +8,7 @@ class UploadManager {
         this.fallbackMode = false;
         this.filename = null;
         this.totalSize = 0;
-        this.saveToHost = false; // Controlled by settings
+        this.saveToHost = false; 
     }
 
     start(filename, saveToHost) {
@@ -78,7 +78,6 @@ class UploadManager {
             if (this.queue.length > 0) {
                  this.statusCallback("Finishing...");
             }
-            // Simple logic: if queue empty, we are good.
             if (this.queue.length === 0) {
                 this.socket.emit('end-upload');
                 this.statusCallback("Saved to Host");
@@ -207,13 +206,18 @@ class CameraSession {
 
         this.stream = null;
         this.recorder = null;
-        this.peer = null;
         this.track = null;
         this.chunks = [];
         this.state = 'IDLE';
 
+        this.peers = {}; // { remoteId: RTCPeerConnection }
+
         this.uploader = new UploadManager(socket, (msg) => { if(this.statusEl) this.statusEl.innerText = msg; });
         this.tracker = new SmartTracker();
+        this.previewInterval = null;
+        this.previewCanvas = document.createElement('canvas');
+        this.previewCanvas.width = 160; this.previewCanvas.height = 90;
+        this.previewCtx = this.previewCanvas.getContext('2d');
 
         this.settings = {
             deviceId: null,
@@ -234,34 +238,38 @@ class CameraSession {
             this.socket.emit('join-camera', { name: this.name });
             this.tracker.load().catch(e => console.warn("AI Load Failed:", e));
             if (this.stream) {
-                this.initRTC();
+                this.refreshPeers();
                 this.socket.emit('camera-state', this.state === 'RECORDING' ? 'recording' : 'idle');
             }
         });
 
         // Command Listeners
-        this.socket.on('switch-lens', id => this.start({ deviceId: id }));
-        this.socket.on('set-tether', e => { 
-            this.settings.saveToHost = e; 
-            this.log(e ? "Tether ON" : "Tether OFF");
+        this.socket.on('switch-lens', (d) => this.start({ deviceId: d.payload }));
+        
+        this.socket.on('set-tether', d => { 
+            this.settings.saveToHost = d.payload; 
+            this.log(d.payload ? "Tether ON" : "Tether OFF");
         });
-        this.socket.on('set-audio-mode', async m => {
-            const isPro = (m === 'pro');
+
+        this.socket.on('set-audio-mode', async d => {
+            const isPro = (d.payload === 'pro');
             if (this.settings.proAudio === isPro) return;
             this.settings.proAudio = isPro;
-            this.log(isPro ? "Audio: Pro" : "Audio: Voice");
+            this.log(isPro ? "Audio: High Fidelity" : "Audio: Voice Mode");
             await this.start();
         });
-        this.socket.on('set-track-mode', async m => {
-            if (this.settings.trackMode === m) return;
-            this.settings.trackMode = m;
-            this.log(`Tracking: ${m}`);
+
+        this.socket.on('set-track-mode', async d => {
+            if (this.settings.trackMode === d.payload) return;
+            this.settings.trackMode = d.payload;
+            this.log(`Tracking: ${d.payload}`);
             await this.start();
         });
-        this.socket.on('control-camera', async c => {
+
+        this.socket.on('control-camera', async d => {
+            const c = d.payload;
             if (c.resolution || c.frameRate) await this.start({ resolution: c.resolution || this.settings.resolution, fps: c.frameRate || this.settings.fps });
             if (c.bitrate) this.settings.recordingBitrate = c.bitrate;
-            // Advanced constraints
             if (this.track) {
                 try {
                     const adv = {};
@@ -272,18 +280,33 @@ class CameraSession {
                 } catch(e) {}
             }
         });
+
         this.socket.on('start-recording', () => this.startRecording());
         this.socket.on('stop-recording', () => this.stopRecording());
         
-        // RTC
-        this.socket.on('answer', a => this.peer && this.peer.setRemoteDescription(new RTCSessionDescription(a)));
-        this.socket.on('remote-candidate', c => this.peer && this.peer.addIceCandidate(new RTCIceCandidate(c)));
-        this.socket.on('request-state', async () => {
+        // --- WebRTC Multi-Peer Logic ---
+        this.socket.on('request-state', async (d) => {
+            // New remote connected. Create a peer for them.
             if(this.stream) {
                 this.socket.emit('camera-state', this.state === 'RECORDING' ? 'recording' : 'idle');
                 const devs = await navigator.mediaDevices.enumerateDevices();
                 this.socket.emit('camera-devices', devs.filter(d => d.kind === 'videoinput'));
                 if (this.track && this.track.getCapabilities) this.socket.emit('camera-capabilities', this.track.getCapabilities());
+                
+                // Initiate connection with this specific remote
+                this.createPeer(d.from);
+            }
+        });
+
+        this.socket.on('answer', (d) => {
+            if (this.peers[d.from]) {
+                this.peers[d.from].setRemoteDescription(new RTCSessionDescription(d.payload));
+            }
+        });
+
+        this.socket.on('remote-candidate', (d) => {
+            if (this.peers[d.from]) {
+                this.peers[d.from].addIceCandidate(new RTCIceCandidate(d.payload));
             }
         });
     }
@@ -306,20 +329,17 @@ class CameraSession {
                 const stream = await navigator.mediaDevices.getUserMedia({
                     video: { deviceId: { exact: deviceId }, width: { exact: res.w }, height: { exact: res.h } }
                 });
-                stream.getTracks().forEach(t => t.stop()); // Close immediately
-                console.log(`[${this.name}] Supports ${res.label}`);
+                stream.getTracks().forEach(t => t.stop()); 
                 return res.h;
-            } catch (e) {
-                console.log(`[${this.name}] ${res.label} not supported.`);
-            }
+            } catch (e) {}
         }
-        return 720; // Fallback
+        return 720; 
     }
 
     async start(updates = {}) {
         Object.assign(this.settings, updates);
         
-        // Stop previous
+        // Stop previous tracks, but keep peers? No, changing stream requires renegotiation.
         if (this.stream) this.stream.getTracks().forEach(t => t.stop());
         
         const audioCon = this.settings.proAudio ? { echoCancellation: false, noiseSuppression: false, autoGainControl: false, channelCount: 2 } : true;
@@ -333,8 +353,6 @@ class CameraSession {
                 frameRate: { ideal: this.settings.fps }
             }
         };
-        
-        // Basic facing mode if generic
         if (!this.settings.deviceId) constraints.video.facingMode = 'environment';
 
         try {
@@ -342,12 +360,6 @@ class CameraSession {
             this.videoEl.srcObject = this.stream;
             this.track = this.stream.getVideoTracks()[0];
             
-            // Send Capabilities
-            const caps = this.track.getCapabilities ? this.track.getCapabilities() : {};
-            this.socket.emit('camera-capabilities', caps);
-            const devs = await navigator.mediaDevices.enumerateDevices();
-            this.socket.emit('camera-devices', devs.filter(d => d.kind === 'videoinput'));
-
             // Setup Tracking
             let finalStream = this.stream;
             if (this.settings.trackMode !== 'off') {
@@ -357,7 +369,12 @@ class CameraSession {
                 this.tracker.stop();
             }
 
-            this.initRTC(finalStream);
+            // Update all connected peers with new stream
+            this.refreshPeers(finalStream);
+
+            // Start Preview Broadcast (1 FPS)
+            if (this.previewInterval) clearInterval(this.previewInterval);
+            this.previewInterval = setInterval(() => this.broadcastPreview(), 1000);
 
         } catch (e) {
             console.error(`[${this.name}] Start failed:`, e);
@@ -368,24 +385,51 @@ class CameraSession {
         }
     }
 
-    initRTC(activeStream = this.stream) {
-        if (this.peer) this.peer.close();
-        this.peer = new RTCPeerConnection({ iceServers: [{ urls: 'stun:stun.l.google.com:19302' }] });
-        activeStream.getTracks().forEach(t => this.peer.addTrack(t, activeStream));
+    broadcastPreview() {
+        if (!this.stream || !this.videoEl) return;
+        try {
+            this.previewCtx.drawImage(this.videoEl, 0, 0, 160, 90);
+            const data = this.previewCanvas.toDataURL('image/jpeg', 0.4);
+            this.socket.emit('preview-frame', data);
+        } catch(e) {}
+    }
+
+    refreshPeers(stream = this.stream) {
+        // For existing peers, replace tracks (if supported) or reconnect
+        // For now, simpler to close and wait for them to reconnect via 'request-state'?
+        // Or just iterate and replaceSender.
+        // Let's iterate and renegotiate.
+        Object.keys(this.peers).forEach(id => this.createPeer(id, stream));
+    }
+
+    createPeer(remoteId, stream = this.stream) {
+        if (!stream) return;
         
-        this.peer.onicecandidate = e => { if (e.candidate) this.socket.emit('camera-candidate', e.candidate); };
-        this.peer.createOffer().then(o => this.peer.setLocalDescription(o)).then(() => this.socket.emit('offer', this.peer.localDescription));
+        if (this.peers[remoteId]) this.peers[remoteId].close();
+        
+        const peer = new RTCPeerConnection({ iceServers: [{ urls: 'stun:stun.l.google.com:19302' }] });
+        this.peers[remoteId] = peer;
+
+        stream.getTracks().forEach(t => peer.addTrack(t, stream));
+        
+        peer.onicecandidate = e => { 
+            if (e.candidate) this.socket.emit('camera-candidate', { target: remoteId, payload: e.candidate }); 
+        };
+
+        peer.createOffer().then(o => peer.setLocalDescription(o)).then(() => {
+            this.socket.emit('offer', { target: remoteId, payload: peer.localDescription });
+        });
     }
 
     startRecording() {
         this.chunks = [];
-        const mime = 'video/webm;codecs=vp9'; // Chrome/Desktop usually supports VP9
+        const mime = 'video/webm;codecs=vp9';
         const options = { mimeType: mime, videoBitsPerSecond: this.settings.recordingBitrate };
         
         try {
             this.recorder = new MediaRecorder(this.stream, options);
         } catch (e) {
-            this.recorder = new MediaRecorder(this.stream); // Fallback
+            this.recorder = new MediaRecorder(this.stream); 
         }
 
         const ext = 'webm';
@@ -403,7 +447,6 @@ class CameraSession {
             this.state = 'IDLE';
             const saved = await this.uploader.stop();
             if (!saved) {
-                // Trigger download in browser
                 const blob = new Blob(this.chunks, { type: 'video/webm' });
                 const url = URL.createObjectURL(blob);
                 const a = document.createElement('a');

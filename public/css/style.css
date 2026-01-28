@@ -158,7 +158,7 @@ input[type=range]::-webkit-slider-runnable-track {
 }
 
 .control-group { display: flex; flex-direction: column; gap: 8px; }
-.control-group label { font-size: 11px; text-transform: uppercase; color: var(--text-muted); font-weight: 600; }
+.control-group label, .control-group .section-label { font-size: 11px; text-transform: uppercase; color: var(--text-muted); font-weight: 600; }
 .row { display: flex; align-items: center; gap: 10px; }
 .icon { color: var(--text-muted); font-size: 14px; width: 20px; text-align: center; }
 
@@ -213,7 +213,7 @@ input[type=range]::-webkit-slider-runnable-track {
     }
 
     /* Make text/sliders slightly larger on desktop */
-    .control-group label { font-size: 12px; margin-bottom: 4px; }
+    .control-group label, .control-group .section-label { font-size: 12px; margin-bottom: 4px; }
     .btn { padding: 10px 18px; }
     
     .shutter-row {

@@ -10,14 +10,23 @@
             display: grid; 
             grid-template-columns: repeat(auto-fit, minmax(50%, 1fr)); 
             width: 100%; height: 100%; 
+            transition: all 0.3s;
         }
-        .cam-container { position: relative; width: 100%; height: 100%; border: 1px solid #333; }
+        .cam-container { position: relative; width: 100%; height: 100%; border: 1px solid #333; transition: all 0.3s; }
         video { width: 100%; height: 100%; object-fit: contain; }
         .label { 
             position: absolute; bottom: 10px; left: 10px; 
             background: rgba(0,0,0,0.7); color: white; padding: 4px 8px; 
             font-family: sans-serif; font-size: 14px; border-radius: 4px;
         }
+
+        /* Fullscreen / Program Mode */
+        .grid.program-mode {
+            grid-template-columns: 1fr;
+            grid-template-rows: 1fr;
+        }
+        .grid.program-mode .cam-container { display: none; border: none; }
+        .grid.program-mode .cam-container.active { display: block; }
     </style>
 </head>
 <body>
@@ -28,11 +37,40 @@
         const socket = io({ transports: ['polling'], reconnection: true });
         const grid = document.getElementById('grid');
         const peers = {}; // { socketId: RTCPeerConnection }
+        let currentProgram = 'grid'; // 'grid' or socketId
 
         socket.on('connect', () => {
             console.log('Connected to server');
             socket.emit('join-remote');
         });
+
+        // --- View Switching ---
+        socket.on('program-change', (targetId) => {
+            console.log("Program Change:", targetId);
+            currentProgram = targetId;
+            updateLayout();
+        });
+
+        function updateLayout() {
+            if (currentProgram === 'grid') {
+                grid.classList.remove('program-mode');
+                Array.from(grid.children).forEach(el => el.classList.remove('active'));
+                
+                // Restore grid math
+                const count = grid.children.length;
+                grid.style.gridTemplateColumns = count > 1 ? 'repeat(auto-fit, minmax(50%, 1fr))' : '1fr';
+                grid.style.gridTemplateRows = count > 2 ? '1fr 1fr' : '1fr';
+            } else {
+                grid.classList.add('program-mode');
+                // Hide all, show target
+                Array.from(grid.children).forEach(el => {
+                    if (el.id === `cam-${currentProgram}`) el.classList.add('active');
+                    else el.classList.remove('active');
+                });
+                grid.style.gridTemplateColumns = '1fr';
+                grid.style.gridTemplateRows = '1fr';
+            }
+        }
 
         // --- Camera Management ---
         function createVideoSlot(id, name) {
@@ -46,22 +84,18 @@
                 <div class="label">${name || 'Camera ' + id.substr(0,4)}</div>
             `;
             grid.appendChild(div);
-            
-            // Adjust grid layout based on count
-            const count = grid.children.length;
-            grid.style.gridTemplateColumns = count > 1 ? '1fr 1fr' : '1fr';
-            grid.style.gridTemplateRows = count > 2 ? '1fr 1fr' : '1fr';
+            updateLayout();
         }
 
         function removeVideoSlot(id) {
             const el = document.getElementById(`cam-${id}`);
             if (el) el.remove();
             if (peers[id]) { peers[id].close(); delete peers[id]; }
+            updateLayout();
         }
 
         socket.on('camera-list', (cameras) => {
             cameras.forEach(c => createVideoSlot(c.id, c.meta.name));
-            // Trigger connection to all
             socket.emit('request-state', { target: 'all' }); 
         });
 
