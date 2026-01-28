@@ -47,6 +47,31 @@ app.get('/network-info', async (req, res) => {
     }
 });
 
+// --- File Upload (Tethered Recording) ---
+// Ensure recordings directory exists
+const recDir = path.join(rootDir, 'recordings');
+if (!fs.existsSync(recDir)) fs.mkdirSync(recDir);
+
+app.post('/upload', (req, res) => {
+    const filename = req.query.filename || `rec_${Date.now()}.webm`;
+    const filePath = path.join(recDir, filename);
+    const writeStream = fs.createWriteStream(filePath);
+
+    console.log(`[Upload] Receiving: ${filename}`);
+
+    req.pipe(writeStream);
+
+    req.on('end', () => {
+        console.log(`[Upload] Completed: ${filename}`);
+        res.status(200).send('Upload Complete');
+    });
+
+    req.on('error', (err) => {
+        console.error(`[Upload] Error: ${err}`);
+        res.status(500).send('Upload Failed');
+    });
+});
+
 io.on('connection', (socket) => {
     console.log('[Server] Connected:', socket.id);
 

@@ -29,8 +29,16 @@
 
     <div class="remote-layout">
         <div class="header" style="display:flex; justify-content:space-between; align-items:center; padding: 0 15px;">
-            <span id="status">Ready</span>
-            <button class="btn" onclick="socket.emit('switch-camera')">↻ Flip</button>
+            <div style="display:flex; gap:10px; align-items:center;">
+                <span id="status">Ready</span>
+                <select id="cam-select" style="width: auto; padding: 4px; background: #333; color: white; border: 1px solid #555;">
+                    <option value="">Scan...</option>
+                </select>
+            </div>
+            <div style="display:flex; gap:10px;">
+                <button id="tether-btn" class="btn" style="padding: 4px 8px; font-size: 10px;">USB SAVE: OFF</button>
+                <button class="btn" onclick="socket.emit('switch-camera')">↻ Flip</button>
+            </div>
         </div>
 
         <div class="viewport">

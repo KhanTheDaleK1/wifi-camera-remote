@@ -24,7 +24,8 @@ let currentSettings = {
     deviceId: null,
     resolution: 1080,
     fps: 30,
-    recordingBitrate: 250000000 // Default to Extreme (250 Mbps)
+    recordingBitrate: 250000000, // Default to Extreme (250 Mbps)
+    saveToHost: false
 };
 
 // --- Wake Lock ---
@@ -260,17 +261,53 @@ socket.on('start-recording', () => {
     }
 
     recorder.ondataavailable = e => chunks.push(e.data);
-    recorder.onstop = () => {
+    recorder.onstop = async () => {
         state = 'IDLE';
         // Ensure extension matches container
         const ext = mime.includes('mp4') ? 'mp4' : 'webm';
-        triggerDownload(new Blob(chunks, { type: mime }), `vid_${Date.now()}.${ext}`);
+        const blob = new Blob(chunks, { type: mime });
+        const filename = `vid_${Date.now()}.${ext}`;
+
+        // Option 1: Save to Host (Tethered Mode)
+        if (currentSettings.saveToHost) {
+            els.status.innerText = "Uploading...";
+            socket.emit('log', { source: 'Camera', level: 'INFO', message: 'Starting background upload...' });
+            
+            try {
+                const res = await fetch(`/upload?filename=${filename}`, {
+                    method: 'POST',
+                    body: blob
+                });
+                
+                if (res.ok) {
+                    els.status.innerText = "Saved to Host";
+                    socket.emit('log', { source: 'Camera', level: 'SUCCESS', message: `Offloaded ${filename} to host.` });
+                } else {
+                    throw new Error('Upload failed');
+                }
+            } catch (e) {
+                els.status.innerText = "Upload Error";
+                socket.emit('log', { source: 'Camera', level: 'ERROR', message: `Upload failed: ${e.message}. Saving locally.` });
+                triggerDownload(blob, filename); // Fallback
+            }
+        } 
+        // Option 2: Save Locally (Default)
+        else {
+            triggerDownload(blob, filename);
+        }
     };
     recorder.start();
     state = 'RECORDING';
     els.recDot.classList.add('active');
     els.status.innerText = "REC";
     socket.emit('camera-state', 'recording');
+});
+
+socket.on('set-tether', (enabled) => {
+    currentSettings.saveToHost = enabled;
+    const msg = enabled ? "Tethered Mode: ON (Files will save to host)" : "Tethered Mode: OFF (Files will save to device)";
+    console.log(msg);
+    socket.emit('log', { source: 'Camera', level: 'INFO', message: msg });
 });
 
 socket.on('stop-recording', () => {

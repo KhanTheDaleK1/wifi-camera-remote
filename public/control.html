@@ -36,6 +36,11 @@
             <button id="photo-btn">SNAP</button>
         </div>
 
+        <div class="row" style="background: #222; padding: 4px; border-radius: 4px;">
+            <input type="checkbox" id="tether-check" style="width: 20px; height: 20px; flex-grow: 0;">
+            <label for="tether-check" style="flex-grow: 1; margin-left: 8px; color: #aaa;">Tethered Mode (Save to Host)</label>
+        </div>
+
         <div class="row">
             <select id="lens-select"><option value="">Lenses...</option></select>
             <button id="torch-btn" style="flex-grow: 0; width: 30px;">⚡</button>
@@ -97,7 +102,8 @@
             gainVal: document.getElementById('gain-val'),
             res: document.getElementById('res-select'),
             fps: document.getElementById('fps-select'),
-            bitrate: document.getElementById('bitrate-select')
+            bitrate: document.getElementById('bitrate-select'),
+            tether: document.getElementById('tether-check')
         };
 
         let recording = false;
@@ -142,6 +148,8 @@
         function requestActiveState() {
             if (!activeCamId) return;
             socket.emit('request-state', { target: activeCamId });
+            // Re-sync tether state if possible (requires camera to send settings, simplified here to just resending UI state)
+            sendCmd('set-tether', els.tether.checked); 
         }
 
         function sendCmd(cmd, payload = {}) {
@@ -175,6 +183,7 @@
         // --- Controls ---
         els.recBtn.onclick = () => sendCmd(recording ? 'stop-recording' : 'start-recording');
         els.photoBtn.onclick = () => sendCmd('take-photo');
+        els.tether.onchange = () => sendCmd('set-tether', els.tether.checked);
         
         els.lens.onchange = () => sendCmd('switch-lens', els.lens.value);
         

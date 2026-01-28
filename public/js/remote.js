@@ -14,18 +14,28 @@ const els = {
     focus: document.getElementById('focus-slider'),
     torch: document.getElementById('torch-btn'),
     res: document.getElementById('res-select'),
-    fps: document.getElementById('fps-select')
+    fps: document.getElementById('fps-select'),
+    camSelect: document.getElementById('cam-select'),
+    tetherBtn: document.getElementById('tether-btn')
 };
 
 let peer, recording = false, torchState = false;
+let activeCamId = null;
+let tetherState = false;
 
+// --- UI Interaction ---
 els.btn.onclick = () => {
     els.start.classList.add('hidden');
     socket.emit('join-remote');
-    socket.emit('request-state');
     els.video.play().catch(() => {});
 };
 
+function sendCmd(cmd, payload = {}) {
+    if (!activeCamId) return;
+    socket.emit(cmd, { target: activeCamId, payload });
+}
+
+// --- Connection ---
 socket.on('connect', () => {
     els.status.innerText = "Connected";
     socket.emit('join-remote');
@@ -33,27 +43,76 @@ socket.on('connect', () => {
 
 socket.on('disconnect', () => {
     els.status.innerText = "Reconnecting...";
+    if (peer) peer.close();
 });
 
-// WebRTC
-socket.on('offer', async (o) => {
+// --- Camera Selection ---
+socket.on('camera-list', (cameras) => {
+    const savedId = activeCamId;
+    els.camSelect.innerHTML = cameras.map(c => `<option value="${c.id}">${c.meta.name || c.id.substr(0,4)}</option>`).join('');
+    
+    if (cameras.length > 0) {
+        if (savedId && cameras.find(c => c.id === savedId)) {
+            els.camSelect.value = savedId;
+        } else {
+            activeCamId = cameras[0].id;
+            els.camSelect.value = activeCamId;
+            connectToCamera(activeCamId);
+        }
+    } else {
+        els.camSelect.innerHTML = '<option>No Cameras</option>';
+        activeCamId = null;
+    }
+});
+
+socket.on('camera-joined', () => socket.emit('join-remote')); 
+socket.on('camera-left', () => socket.emit('join-remote'));
+
+els.camSelect.onchange = () => {
+    activeCamId = els.camSelect.value;
+    connectToCamera(activeCamId);
+};
+
+function connectToCamera(id) {
+    if (peer) peer.close();
+    socket.emit('request-state', { target: id });
+    // Restore tether state to new cam
+    sendCmd('set-tether', tetherState);
+}
+
+// --- WebRTC Logic (Multi-Cam Aware) ---
+socket.on('offer', async (data) => {
+    if (data.from !== activeCamId) return; // Ignore other cameras
+
     if (peer) peer.close();
     peer = new RTCPeerConnection({ iceServers: [{ urls: 'stun:stun.l.google.com:19302' }] });
+    
     peer.ontrack = e => { els.video.srcObject = e.streams[0]; };
-    peer.onicecandidate = e => { if (e.candidate) socket.emit('remote-candidate', e.candidate); };
-    await peer.setRemoteDescription(new RTCSessionDescription(o));
+    peer.onicecandidate = e => { 
+        if (e.candidate) socket.emit('remote-candidate', { target: activeCamId, payload: e.candidate }); 
+    };
+
+    await peer.setRemoteDescription(new RTCSessionDescription(data.payload));
     const a = await peer.createAnswer();
     await peer.setLocalDescription(a);
-    socket.emit('answer', a);
-});
-socket.on('camera-candidate', c => peer && peer.addIceCandidate(new RTCIceCandidate(c)));
-
-// UI Updates
-socket.on('camera-devices', (devs) => {
-    els.lensSelect.innerHTML = devs.map(d => `<option value="${d.deviceId}">${d.label || 'Lens'}</option>`).join('');
+    socket.emit('answer', { target: activeCamId, payload: a });
 });
 
-socket.on('camera-capabilities', (caps) => {
+socket.on('camera-candidate', (data) => {
+    if (data.from === activeCamId && peer) {
+        peer.addIceCandidate(new RTCIceCandidate(data.payload));
+    }
+});
+
+// --- State & UI Updates ---
+socket.on('camera-devices', (d) => {
+    if (d.from !== activeCamId) return;
+    els.lensSelect.innerHTML = d.payload.map(x => `<option value="${x.deviceId}">${x.label || 'Lens'}</option>`).join('');
+});
+
+socket.on('camera-capabilities', (d) => {
+    if (d.from !== activeCamId) return;
+    const caps = d.payload;
     if (caps.zoom) {
         els.zoom.min = caps.zoom.min;
         els.zoom.max = caps.zoom.max;
@@ -61,22 +120,31 @@ socket.on('camera-capabilities', (caps) => {
     }
 });
 
-socket.on('camera-state', s => {
-    recording = (s === 'recording');
+socket.on('camera-state', d => {
+    if (d.from !== activeCamId) return;
+    recording = (d.payload === 'recording');
     els.shutter.classList.toggle('recording', recording);
     els.status.innerText = recording ? "REC" : "Ready";
     els.status.style.color = recording ? "red" : "white";
 });
 
-// Control Events
-els.shutter.onclick = () => socket.emit(recording ? 'stop-recording' : 'start-recording');
-els.lensSelect.onchange = () => socket.emit('switch-lens', els.lensSelect.value);
-els.res.onchange = () => socket.emit('control-camera', { resolution: parseInt(els.res.value) });
-els.fps.onchange = () => socket.emit('control-camera', { frameRate: parseInt(els.fps.value) });
-els.zoom.oninput = () => socket.emit('control-camera', { zoom: parseFloat(els.zoom.value) });
-els.focus.oninput = () => socket.emit('control-camera', { focusDistance: parseFloat(els.focus.value) });
+// --- Controls ---
+els.shutter.onclick = () => sendCmd(recording ? 'stop-recording' : 'start-recording');
+
+els.tetherBtn.onclick = () => {
+    tetherState = !tetherState;
+    els.tetherBtn.innerText = tetherState ? "USB SAVE: ON" : "USB SAVE: OFF";
+    els.tetherBtn.style.background = tetherState ? "#0a84ff" : "#333";
+    sendCmd('set-tether', tetherState);
+};
+
+els.lensSelect.onchange = () => sendCmd('switch-lens', els.lensSelect.value);
+els.res.onchange = () => sendCmd('control-camera', { resolution: parseInt(els.res.value) });
+els.fps.onchange = () => sendCmd('control-camera', { frameRate: parseInt(els.fps.value) });
+els.zoom.oninput = () => sendCmd('control-camera', { zoom: parseFloat(els.zoom.value) });
+els.focus.oninput = () => sendCmd('control-camera', { focusDistance: parseFloat(els.focus.value) });
 els.torch.onclick = () => {
     torchState = !torchState;
     els.torch.classList.toggle('active', torchState);
-    socket.emit('control-camera', { torch: torchState });
+    sendCmd('control-camera', { torch: torchState });
 };
