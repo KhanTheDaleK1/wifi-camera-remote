@@ -5,6 +5,33 @@
 
 Turn your smartphones AND USB webcams into high-quality, wireless studio cameras with professional controls, ASMR-ready audio, and a **Multi-Camera Switcher** for OBS.
 
+## 🚀 Quick Start (1-Click)
+
+**macOS / Linux:**
+1.  Double-click `Install_and_Run.command` in the project folder.
+2.  That's it! It will install everything and launch the studio.
+
+**Windows:**
+1.  Ensure Node.js is installed.
+2.  Double-click `start.bat` (create this if needed or run `npm start`).
+
+## 💻 System Requirements
+
+### Host Computer (Server)
+*   **OS:** macOS, Windows 10/11, or Linux.
+*   **Runtime:** [Node.js v18+](https://nodejs.org/) (Required).
+*   **Network:** 5GHz WiFi or Gigabit Ethernet (Highly recommended for 4K video).
+*   **Hardware:**
+    *   CPU: Intel i5 (8th Gen) / Ryzen 5 / Apple M1 or better.
+    *   RAM: 8GB recommended (especially if running OBS on the same machine).
+
+### Mobile Devices (Cameras)
+*   **Android:** Chrome (Latest). Android 10+. *USB Debugging required for Auto-Launch.*
+*   **iOS:** Safari (Latest). iOS 15+ (Required for WebRTC).
+*   **Hardware:**
+    *   **4K Streaming:** Requires high-end devices (e.g., Pixel 6+, iPhone 12+, Galaxy S21+).
+    *   **1080p Streaming:** Works on most modern smartphones (iPhone 8+, Pixel 3+).
+
 ## Key Features
 - **Multi-Camera Support:** Connect unlimited phones and USB webcams.
 - **Host Camera Hub:** Use your computer's USB webcams as studio inputs with full remote control and tracking.
