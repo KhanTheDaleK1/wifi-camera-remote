@@ -105,7 +105,10 @@ els.camSelect.onchange = () => {
 
 function connectToCamera(id) {
     if (peer) peer.close();
+    els.status.innerText = "Requesting Stream...";
+    console.log("[Remote] Requesting state from", id);
     socket.emit('request-state', { target: id });
+    
     // Restore states
     sendCmd('set-tether', tetherState);
     sendCmd('set-audio-mode', audioState ? 'pro' : 'voice');
@@ -114,20 +117,50 @@ function connectToCamera(id) {
 
 // --- WebRTC Logic (Multi-Cam Aware) ---
 socket.on('offer', async (data) => {
-    if (data.from !== activeCamId) return; // Ignore other cameras
+    if (data.from !== activeCamId) return; 
+    console.log("[Remote] Offer Received");
+    els.status.innerText = "Negotiating...";
 
     if (peer) peer.close();
     peer = new RTCPeerConnection({ iceServers: [{ urls: 'stun:stun.l.google.com:19302' }] });
     
-    peer.ontrack = e => { els.video.srcObject = e.streams[0]; };
+    peer.oniceconnectionstatechange = () => {
+        console.log("[Remote] ICE State:", peer.iceConnectionState);
+        els.status.innerText = `ICE: ${peer.iceConnectionState}`;
+        if (peer.iceConnectionState === 'connected') {
+            els.status.innerText = "Connected";
+            els.status.style.color = "#00cc00";
+        }
+        if (peer.iceConnectionState === 'failed') {
+            els.status.innerText = "Connection Failed (Firewall?)";
+            els.status.style.color = "red";
+        }
+    };
+
+    peer.ontrack = async (e) => { 
+        console.log("[Remote] Track Received");
+        els.video.srcObject = e.streams[0]; 
+        try {
+            await els.video.play();
+        } catch (err) {
+            if (err.name !== 'AbortError') console.error("Autoplay blocked:", err);
+        }
+    };
+    
     peer.onicecandidate = e => { 
         if (e.candidate) socket.emit('remote-candidate', { target: activeCamId, payload: e.candidate }); 
     };
 
-    await peer.setRemoteDescription(new RTCSessionDescription(data.payload));
-    const a = await peer.createAnswer();
-    await peer.setLocalDescription(a);
-    socket.emit('answer', { target: activeCamId, payload: a });
+    try {
+        await peer.setRemoteDescription(new RTCSessionDescription(data.payload));
+        const a = await peer.createAnswer();
+        await peer.setLocalDescription(a);
+        socket.emit('answer', { target: activeCamId, payload: a });
+        console.log("[Remote] Answer Sent");
+    } catch (e) {
+        console.error("[Remote] Signaling Error:", e);
+        els.status.innerText = "Signal Error";
+    }
 });
 
 socket.on('camera-candidate', (data) => {

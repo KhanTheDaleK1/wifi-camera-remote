@@ -286,6 +286,7 @@ class CameraSession {
         
         // --- WebRTC Multi-Peer Logic ---
         this.socket.on('request-state', async (d) => {
+            console.log(`[${this.name}] Request State from ${d.from}`);
             // New remote connected. Create a peer for them.
             if(this.stream) {
                 this.socket.emit('camera-state', this.state === 'RECORDING' ? 'recording' : 'idle');
@@ -295,10 +296,13 @@ class CameraSession {
                 
                 // Initiate connection with this specific remote
                 this.createPeer(d.from);
+            } else {
+                console.warn(`[${this.name}] Request received but stream is null.`);
             }
         });
 
         this.socket.on('answer', (d) => {
+            console.log(`[${this.name}] Answer from ${d.from}`);
             if (this.peers[d.from]) {
                 this.peers[d.from].setRemoteDescription(new RTCSessionDescription(d.payload));
             }

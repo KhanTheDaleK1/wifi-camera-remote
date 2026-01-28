@@ -1,63 +1,71 @@
 # WiFi Camera Remote (Studio Edition)
 
-Turn your smartphone into a high-quality, wireless webcam with professional controls, ASMR-ready audio, and **Multi-Camera Studio** support for OBS.
+Turn your smartphones AND USB webcams into high-quality, wireless studio cameras with professional controls, ASMR-ready audio, and a **Multi-Camera Switcher** for OBS.
 
 ## Key Features
-- **Multi-Camera Support:** Connect multiple phones and see them all in OBS simultaneously.
-- **USB Data Transfer:** Offload 4K recordings directly to your computer over a wired connection (Tethered Mode).
-- **USB Live Feed:** Use ADB port-forwarding or USB Tethering for ultra-low latency, interference-free video in OBS.
-- **Studio Controller:** Select which camera to control (Zoom, Focus, Lens) from a single dock.
-- **Smart Auto-Tuning:** Automatically detects device capabilities and sets optimal resolution/bitrate.
-- **Pro Audio:** Toggle between "Voice" (processing enabled) and "Pro" (raw/ASMR) audio modes.
-- **Extreme Quality:** Up to 4K resolution at 250 Mbps bitrate (on supported devices).
+- **Multi-Camera Support:** Connect unlimited phones and USB webcams.
+- **Host Camera Hub:** Use your computer's USB webcams as studio inputs with full remote control and tracking.
+- **OBS Switcher Dock:** A dedicated dock for OBS that shows live thumbnails of all cameras and lets you cut between them instantly.
+- **AI Smart Tracking:** Face, Body, and Object tracking (keeps you or your product in frame automatically).
+- **USB Data Transfer:** Offload 4K recordings directly to your computer (Tethered Mode).
+- **Fault-Tolerant Recording:** "Smart Buffer" ensures you never lose a frame, even if the cable is unplugged.
+- **Auto-Launch:** Plug in an Android phone, and the camera app opens automatically.
 
 ## Installation
-...
+
+1.  **Clone the repository:**
+    ```bash
+    git clone https://github.com/KhanTheDaleK1/wifi-camera-remote.git
+    cd wifi-camera-remote
+    ```
+
+2.  **Install dependencies:**
+    ```bash
+    npm install
+    ```
+
+3.  **Generate SSL Certificates:**
+    ```bash
+    bash scripts/generate_cert.sh
+    ```
+
+4.  **Start the Server:**
+    ```bash
+    npm start
     ```
     *   **HTTPS (Phones):** Port 3001
-    *   **HTTP (OBS):** Port 3002
+    *   **HTTP (OBS/Host):** Port 3002
 
-## USB Connectivity (Recommended)
-For the most stable connection and highest data speeds, use a wired USB connection.
+## Connecting Cameras
 
-### 1. Android (ADB Port Forwarding)
-The "Gold Standard" for reliability. Works even in Airplane Mode.
-1. Enable **USB Debugging** on your phone.
-2. Connect via USB and run:
-   ```bash
-   ./usb-connect.sh
-   ```
-3. Open `https://localhost:3001` on your phone's Chrome browser.
+### 1. Phones (WiFi or USB)
+*   **Android:** Plug in via USB. The server will auto-detect it and launch the camera app.
+*   **iOS:** Connect via USB (Personal Hotspot) or WiFi. Navigate to the IP shown in the terminal (e.g., `https://192.168.1.5:3001`).
 
-### 2. iOS / Universal (USB Tethering)
-1. Connect via USB.
-2. Enable **Personal Hotspot (USB Only)** on iPhone or **USB Tethering** on Android.
-3. When you run `npm start`, look for the IP labeled `(Likely USB/Ethernet)`.
-4. Open that IP on your phone.
+### 2. USB Webcams (Host Hub)
+1.  Open the **Host Hub** on your computer: `http://localhost:3002/host.html`
+2.  Click **"Start"** on any connected webcam.
+3.  These cameras now appear in the Remote and OBS Switcher just like phone cameras.
 
-### 3. Tethered File Offload
-Save 4K videos directly to your computer's hard drive:
-1. Enable **"USB SAVE"** (Remote) or **"Tethered Mode"** (Control).
-2. Record your video.
-3.  Upon stopping, the file is automatically moved to the `recordings/` folder on your computer.
+## OBS Studio Setup
 
-### 4. Fault-Tolerant Recording
-The system uses a "Smart Buffer" to ensure zero frame loss:
-- **Chunking:** Video is recorded in 1-second chunks and streamed immediately.
-- **Buffering:** If the connection slows down, chunks are queued in RAM.
-- **Auto-Fallback:** If the USB cable is unplugged or the network fails, the system automatically switches to **Local Storage Mode**, saving the full high-quality file to your phone at the end.
+### 1. Video Feed (Program View)
+Add a **Browser Source** to your scene:
+*   **URL:** `http://localhost:3002/obs.html`
+*   **Size:** `1920x1080`
+*   *This source automatically switches between "Grid View" and "Fullscreen" based on your commands.*
 
-## Usage Guide
-...
-    *   URL: `http://localhost:3002/control.html`
-    *   *Use the dropdown at the top to select which camera to control.*
+### 2. Studio Switcher Dock
+Go to **Docks > Custom Browser Docks...**
+*   **Name:** `Studio Switcher`
+*   **URL:** `http://localhost:3002/control.html`
+*   *Apply* and dock it into your OBS interface.
+
+**Using the Switcher:**
+*   **Click a Thumbnail:** Instantly cuts the Program View to that camera and selects it for control.
+*   **Grid View Button:** Returns the Program View to the multi-camera grid.
 
 ## Advanced Features
-
-### Audio Modes
-Toggle between two audio profiles:
-- **Voice Mode:** Optimizes for speech with Echo Cancellation and Noise Suppression (best for calls).
-- **High Fidelity:** Disables all processing for raw, high-fidelity audio (best for ASMR, music, or professional mics).
 
 ### AI Smart Tracking
 Select from three tracking modes to keep your subject in frame:
@@ -65,23 +73,16 @@ Select from three tracking modes to keep your subject in frame:
 - **Body:** Tracks the entire person. Good for standing presentations.
 - **Object:** Ignores people and locks onto the largest inanimate object (phone, product, tool). Perfect for hands-only demos.
 
-### Hardware Tiers
-...
+### High Fidelity Audio
+Toggle between two audio profiles:
+- **Voice Mode:** Optimizes for speech with Echo Cancellation and Noise Suppression (best for calls).
+- **High Fidelity:** Disables all processing for raw, full-spectrum audio (best for ASMR, music, or professional mics).
 
-### Thermal Protection
-If the device starts to throttle (encoder latency > 25ms), the system will log a warning and automatically downgrade the stream to 720p to preserve the connection.
-
-### Bitrate Control
-In the Studio Dock, you can manually override the bitrate:
-- **250M:** Extreme quality (Local recording mostly)
-- **100M:** High quality streaming
-- **50M:** Stable streaming
-- **15M:** Standard (Good for weak Wi-Fi)
-
-## Troubleshooting
-- **No Video in OBS?** Refresh the Browser Source cache.
-- **Controls not working?** Ensure you have selected the correct camera ID in the dock dropdown.
-- **Audio Feedback?** Mute the OBS source monitoring or use headphones.
+### Fault-Tolerant Recording
+The system uses a "Smart Buffer" to ensure zero frame loss:
+- **Chunking:** Video is streamed in 1-second chunks.
+- **Buffering:** If the connection slows down, chunks are queued in RAM.
+- **Auto-Fallback:** If the network fails completely, the system seamlessly switches to **Local Storage Mode**, saving the full file to the device.
 
 ---
 Created by Evan Beechem
