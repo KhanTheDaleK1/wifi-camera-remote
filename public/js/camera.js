@@ -1,5 +1,9 @@
 // camera.js - Mobile Client Wrapper for CameraSession
-const socket = io({ transports: ['polling'], reconnection: true });
+const socket = io({ 
+    transports: ['websocket', 'polling'], 
+    reconnection: true,
+    autoConnect: false // Don't connect until START is clicked
+});
 const noSleep = new NoSleep();
 
 const els = {
@@ -9,12 +13,11 @@ const els = {
     video: document.getElementById('viewfinder'),
     status: document.getElementById('status-text'),
     recDot: document.getElementById('rec-dot'),
-    dlBtn: document.getElementById('dl-btn')
+    dlBtn: document.getElementById('dl-btn'),
+    log: document.getElementById('init-log')
 };
 
-// Create Session
-// We pass the global socket so it reuses the connection established by the page
-const session = new CameraSession(socket, els.video, els.status, els.recDot);
+let session = null;
 
 // --- Wake Lock ---
 let wakeLock = null;
@@ -22,7 +25,6 @@ async function requestWakeLock() {
     try {
         wakeLock = await navigator.wakeLock.request('screen');
         console.log('Screen Wake Lock active');
-        wakeLock.addEventListener('release', () => console.log('Wake Lock released'));
     } catch (err) {
         console.warn(`${err.name}, ${err.message}`);
     }
@@ -30,45 +32,45 @@ async function requestWakeLock() {
 
 // --- Start Handler ---
 els.btn.onclick = async () => {
+    els.btn.disabled = true;
+    els.btn.innerText = "INITIALIZING...";
+    
     try {
         // 1. Prevent Sleep
         if ('wakeLock' in navigator) {
             await requestWakeLock();
-            document.addEventListener('visibilitychange', async () => {
-                if (wakeLock !== null && document.visibilityState === 'visible') {
-                    await requestWakeLock();
-                }
-            });
         } else {
             noSleep.enable();
         }
         
-        // 2. Mobile Tuning
+        // 2. Connect Socket ONLY NOW
+        socket.connect();
+        
+        // 3. Initialize Session
+        session = new CameraSession(socket, els.video, els.status, els.recDot, "iPhone Camera");
+
+        // 4. Mobile Tuning
         let startSettings = {};
         if (typeof DeviceTuner !== 'undefined') {
             try {
                 const tuned = await DeviceTuner.getOptimizedConstraints();
-                console.log("Applying Tuned Profile:", tuned);
                 startSettings.resolution = tuned.height;
                 startSettings.fps = tuned.frameRate;
             } catch (e) {
-                console.warn("Tuner failed, using defaults", e);
+                console.warn("Tuner failed", e);
             }
         }
 
-        // 3. Start Session
+        // 5. Start Media
         await session.start(startSettings);
         
         els.start.classList.add('hidden');
         els.overlay.classList.remove('hidden');
 
     } catch (e) { 
-        alert("Fail: " + e.message); 
+        alert("Camera Error: " + e.message); 
         console.error(e);
+        els.btn.disabled = false;
+        els.btn.innerText = "START CAMERA";
     }
 };
-
-// --- Download Button Handler (Legacy Fallback) ---
-// CameraSession handles uploads, but if it falls back to local blob download, 
-// it creates a link. If we want a persistent button:
-// (CameraSession currently appends a temporary link. We can enhance this later if needed.)

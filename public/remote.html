@@ -47,8 +47,17 @@
                     <select id="lens-select" class="full-width"><option value="">Lens...</option></select>
                 </div>
                 <div class="row">
-                    <select id="res-select"><option value="1080">1080p</option></select>
-                    <select id="fps-select"><option value="30">30 fps</option></select>
+                    <select id="res-select">
+                        <option value="2160">4K (Ultra HD)</option>
+                        <option value="1080" selected>1080p (Full HD)</option>
+                        <option value="720">720p (HD)</option>
+                    </select>
+                    <select id="fps-select">
+                        <option value="120">120 fps (Slo-mo)</option>
+                        <option value="60">60 fps</option>
+                        <option value="30" selected>30 fps</option>
+                        <option value="24">24 fps</option>
+                    </select>
                     <button id="torch-btn" class="btn-icon">⚡</button>
                 </div>
             </div>

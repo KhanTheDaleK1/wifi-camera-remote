@@ -100,6 +100,7 @@
         <select id="cam-select" class="grow" style="background:transparent; border:none; font-weight:bold;">
             <option value="">Searching...</option>
         </select>
+        <a href="recordings.html" target="_blank" style="text-decoration:none; font-size:9px; color:#aaa; margin-right:5px;">📁 REC</a>
         <div id="conn-ind" class="status-ind"></div>
     </div>
 
@@ -186,7 +187,7 @@
 
     <script src="https://cdn.socket.io/4.7.2/socket.io.min.js"></script>
     <script>
-        const socket = io({ transports: ['polling'] });
+        const socket = io({ transports: ['websocket', 'polling'] });
         
         const els = {
             connInd: document.getElementById('conn-ind'),
@@ -231,19 +232,33 @@
 
         socket.on('camera-list', (cams) => {
             const saved = activeCamId;
-            els.camSelect.innerHTML = cams.map(c => `<option value="${c.id}">${c.meta.name || c.id.substr(0,4)}</option>`).join('');
+            
+            // Ensure uniqueness
+            const uniqueCams = [];
+            const seen = new Set();
+            cams.forEach(c => {
+                if (!seen.has(c.id)) {
+                    seen.add(c.id);
+                    uniqueCams.push(c);
+                }
+            });
+
+            els.camSelect.innerHTML = uniqueCams.map(c => `<option value="${c.id}">${c.meta.name || c.id.substr(0,4)}</option>`).join('');
             
             // Rebuild Multiview
             els.multiview.innerHTML = '';
-            cams.forEach(c => {
+            uniqueCams.forEach(c => {
                 camNames[c.id] = c.meta.name || c.id.substr(0,4);
                 createThumb(c.id, camNames[c.id]);
             });
 
-            if(cams.length > 0) {
-                if(saved && cams.find(c => c.id === saved)) els.camSelect.value = saved;
+            if(uniqueCams.length > 0) {
+                if(saved && uniqueCams.find(c => c.id === saved)) {
+                    els.camSelect.value = saved;
+                    selectThumb(saved);
+                }
                 else { 
-                    activeCamId = cams[0].id; 
+                    activeCamId = uniqueCams[0].id; 
                     els.camSelect.value = activeCamId; 
                     refreshState(); 
                     selectThumb(activeCamId);

@@ -15,6 +15,10 @@ const app = express();
 // Path to project root
 const rootDir = path.join(__dirname, '..');
 
+// Ensure recordings directory exists
+const recDir = path.join(rootDir, 'recordings');
+if (!fs.existsSync(recDir)) fs.mkdirSync(recDir);
+
 const server = https.createServer({
   key: fs.readFileSync(path.join(rootDir, 'certs', 'key.pem')),
   cert: fs.readFileSync(path.join(rootDir, 'certs', 'cert.pem'))
@@ -24,12 +28,13 @@ const httpServer = http.createServer(app);
 
 const io = socketIo(server, {
     cors: { origin: "*" },
-    transports: ['polling', 'websocket'] 
+    transports: ['websocket', 'polling'] 
 });
 io.attach(httpServer);
 
 app.use(express.static(path.join(rootDir, 'public')));
 app.use('/node_modules', express.static(path.join(rootDir, 'node_modules')));
+app.use('/recordings', express.static(path.join(rootDir, 'recordings')));
 
 app.use(function(req, res, next) {
     res.header("Access-Control-Allow-Origin", "*");
@@ -37,8 +42,35 @@ app.use(function(req, res, next) {
     next();
 });
 
+app.get('/list-recordings', (req, res) => {
+    console.log('[API] /list-recordings requested');
+    fs.readdir(recDir, (err, files) => {
+        if (err) return res.status(500).send(err);
+        // Filter out hidden files and sort by date (newest first)
+        const sorted = files.filter(f => !f.startsWith('.'))
+            .map(f => ({ name: f, time: fs.statSync(path.join(recDir, f)).mtime.getTime() }))
+            .sort((a, b) => b.time - a.time);
+        res.json(sorted);
+    });
+});
+
 app.get('/network-info', async (req, res) => {
-    const HOST_IP = process.env.HOST_IP || ip.address();
+    let HOST_IP = process.env.HOST_IP || ip.address();
+    
+    // Auto-detect and prioritize iPhone USB Tethering IP
+    const interfaces = os.networkInterfaces();
+    for (const ifname of Object.keys(interfaces)) {
+        for (const iface of interfaces[ifname]) {
+            if ('IPv4' === iface.family && !iface.internal) {
+                // Priority 1: iPhone USB (usually 172.20.x.x on enX)
+                if (ifname.includes('en') && (iface.address.startsWith('172.20.'))) {
+                    HOST_IP = iface.address;
+                    break;
+                }
+            }
+        }
+    }
+
     const url = `https://${HOST_IP}:${PORT}/camera.html`;
     try {
         const qr = await QRCode.toDataURL(url);
@@ -49,15 +81,13 @@ app.get('/network-info', async (req, res) => {
 });
 
 // --- File Upload (Tethered Recording) ---
-// Ensure recordings directory exists
-const recDir = path.join(rootDir, 'recordings');
-if (!fs.existsSync(recDir)) fs.mkdirSync(recDir);
 
 // Upload State Tracking
 const uploadStreams = new Map(); // socket.id -> { stream, filename }
 
 io.on('connection', (socket) => {
-    console.log('[Server] Connected:', socket.id);
+    const clientIp = socket.request.connection.remoteAddress;
+    console.log(`[Server] Connected: ${socket.id} from ${clientIp}`);
 
     // --- Tethered Upload Handlers ---
     socket.on('start-upload', ({ filename }, ack) => {
@@ -124,12 +154,18 @@ io.on('connection', (socket) => {
         // Send list of existing cameras to the new remote
         const cameras = [];
         const room = io.sockets.adapter.rooms.get('camera');
+        
+        console.log(`[Server] Remote ${socket.id} joining. Camera room size: ${room ? room.size : 0}`);
+        
         if (room) {
-            room.forEach(id => {
+            for (const id of room) {
                 const s = io.sockets.sockets.get(id);
-                if (s) cameras.push({ id: s.id, meta: s.cameraMeta });
-            });
+                if (s) {
+                    cameras.push({ id: s.id, meta: s.cameraMeta || { name: 'Unknown' } });
+                }
+            }
         }
+        console.log(`[Server] Sending camera list to ${socket.id}: ${JSON.stringify(cameras.map(c => c.id))}`);
         socket.emit('camera-list', cameras);
     });
 
@@ -221,21 +257,33 @@ io.on('connection', (socket) => {
 const os = require('os');
 
 server.listen(PORT, '0.0.0.0', () => {
-    console.log(`\n--- HTTPS Server Running ---`);
+    console.log(`\n--- HTTPS Studio Server Running ---`);
     console.log(`Port: ${PORT}`);
     
-    // Start Android Auto-Launcher
+    // Android Only Feature
+    console.log(`[Status] Android Auto-Launcher Active (Watching for USB Devices)`);
     androidLauncher.start();
 
-    console.log(`Available Networks:`);
+    console.log(`\nConnection Guide:`);
+    console.log(`📱 iPhone (Wired): Turn on Personal Hotspot + Connect USB`);
+    console.log(`🤖 Android (Wired): Connect USB + Enable Debugging (Auto-Launch)`);
+    console.log(`🌐 WiFi: Just scan the QR code on the main page`);
+    
+    console.log(`\nAvailable Networks:`);
     
     const interfaces = os.networkInterfaces();
     Object.keys(interfaces).forEach((ifname) => {
         interfaces[ifname].forEach((iface) => {
             if ('IPv4' !== iface.family || iface.internal !== false) return;
-            // Highlight likely USB interfaces (often named rndis, eth, or en with 192.168.x.x)
-            const isUSB = ifname.toLowerCase().includes('rndis') || ifname.toLowerCase().includes('usb') || ifname.toLowerCase().includes('eth');
-            const label = isUSB ? " (Likely USB/Ethernet)" : "";
+            
+            // iPhone Tethering usually shows up as an interface with a specific name or a 172.20.x.x IP
+            const isiPhoneUSB = ifname.includes('en') && (iface.address.startsWith('172.20.'));
+            const isEthernet = ifname.toLowerCase().includes('eth') || ifname.toLowerCase().includes('usb');
+            
+            let label = "";
+            if (isiPhoneUSB) label = " (🔥 iPhone USB Tethering - RECOMMENDED)";
+            else if (isEthernet) label = " (Wired Ethernet/USB)";
+            
             console.log(`  - ${ifname}: https://${iface.address}:${PORT} ${label}`);
         });
     });

@@ -1,0 +1,58 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Studio Recordings</title>
+    <link rel="stylesheet" href="css/style.css">
+    <style>
+        body { padding: 20px; overflow: auto; }
+        .recording-list { display: flex; flex-direction: column; gap: 10px; max-width: 600px; margin: 0 auto; }
+        .file-card { 
+            background: #222; padding: 15px; border-radius: 8px; border: 1px solid #333;
+            display: flex; justify-content: space-between; align-items: center;
+        }
+        .file-info { display: flex; flex-direction: column; }
+        .file-name { font-weight: bold; color: #0a84ff; word-break: break-all; }
+        .file-meta { font-size: 11px; color: #888; margin-top: 4px; }
+        .dl-link { 
+            background: #0a84ff; color: white; padding: 8px 16px; border-radius: 4px; 
+            text-decoration: none; font-size: 12px; font-weight: bold;
+        }
+    </style>
+</head>
+<body class="col">
+    <div style="max-width: 600px; width: 100%; margin: 0 auto; display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px;">
+        <h1>Recordings</h1>
+        <button class="btn btn-sm" onclick="loadFiles()">Refresh</button>
+    </div>
+
+    <div id="file-list" class="recording-list">
+        <p>Loading files...</p>
+    </div>
+
+    <script>
+        function loadFiles() {
+            fetch('/list-recordings')
+                .then(r => r.json())
+                .then(files => {
+                    const list = document.getElementById('file-list');
+                    if (files.length === 0) {
+                        list.innerHTML = '<p>No recordings found yet.</p>';
+                        return;
+                    }
+                    list.innerHTML = files.map(f => `
+                        <div class="file-card">
+                            <div class="file-info">
+                                <span class="file-name">${f.name}</span>
+                                <span class="file-meta">${new Date(f.time).toLocaleString()}</span>
+                            </div>
+                            <a href="/recordings/${f.name}" class="dl-link" download>Download</a>
+                        </div>
+                    `).join('');
+                });
+        }
+        loadFiles();
+    </script>
+</body>
+</html>

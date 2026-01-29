@@ -7,34 +7,30 @@
     <link rel="stylesheet" href="css/style.css">
     <style>
         body { overflow: auto; padding: 20px; }
-        .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(400px, 1fr)); gap: 20px; }
+        .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(350px, 1fr)); gap: 20px; }
         .cam-card { background: #111; border: 1px solid #333; border-radius: 10px; overflow: hidden; display: flex; flex-direction: column; }
         .cam-header { background: #222; padding: 10px; display: flex; justify-content: space-between; align-items: center; }
-        .cam-preview { width: 100%; aspect-ratio: 16/9; background: #000; position: relative; cursor: pointer; transition: opacity 0.2s; }
-        .cam-preview:hover { opacity: 0.9; }
-        .cam-preview::after { content: '🔗 Open Remote'; position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); color: white; background: rgba(0,0,0,0.7); padding: 8px 12px; border-radius: 4px; opacity: 0; pointer-events: none; transition: opacity 0.2s; }
-        .cam-preview:hover::after { opacity: 1; }
-        video { width: 100%; height: 100%; object-fit: cover; pointer-events: none; }
+        .cam-preview { width: 100%; aspect-ratio: 16/9; background: #000; position: relative; }
+        video { width: 100%; height: 100%; object-fit: cover; }
         .status-overlay { position: absolute; bottom: 10px; left: 10px; background: rgba(0,0,0,0.7); padding: 4px 8px; border-radius: 4px; font-size: 12px; }
         .rec-dot { width: 10px; height: 10px; background: #555; border-radius: 50%; display: inline-block; margin-right: 5px; }
         .rec-dot.active { background: red; animation: pulse 1s infinite; }
         .cam-controls { padding: 10px; display: flex; gap: 10px; justify-content: flex-end; }
+        .id-badge { font-family: monospace; font-size: 10px; background: #333; padding: 2px 4px; border-radius: 3px; color: #aaa; }
+        .is-virtual { opacity: 0.5; }
         @keyframes pulse { 0% { opacity: 1; } 50% { opacity: 0.5; } 100% { opacity: 1; } }
     </style>
 </head>
 <body>
     <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px;">
-        <h1>Host Camera Hub <span style="font-size: 12px; color: #ff9f0a; vertical-align: middle;">(ALPHA)</span></h1>
+        <h1>Camera Hub <span style="font-size: 12px; color: #ff9f0a; vertical-align: middle;">(ALPHA)</span></h1>
         <div>
             <button class="btn btn-primary" onclick="scanDevices()">Rescan Devices</button>
-            <button class="btn" onclick="startAll()">Start All</button>
             <a href="remote.html" class="btn" target="_blank" style="text-decoration:none;">Open Main Remote</a>
         </div>
     </div>
 
-    <div id="grid" class="grid">
-        <!-- Cards injected here -->
-    </div>
+    <div id="grid" class="grid"></div>
 
     <script src="https://cdn.socket.io/4.7.2/socket.io.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs@3.11.0"></script>
@@ -44,17 +40,40 @@
 
     <script>
         const grid = document.getElementById('grid');
-        const sessions = [];
+        const sessionMap = new Map(); // index -> session
 
         async function scanDevices() {
-            grid.innerHTML = '';
-            sessions.length = 0; // Clear old sessions
+            grid.innerHTML = '<p>Scanning for hardware...</p>';
+            sessionMap.clear();
+
+            try {
+                // IMPORTANT: We must request permission once to "unlock" the full device list labels
+                // This is a browser security requirement.
+                const stream = await navigator.mediaDevices.getUserMedia({ video: true });
+                stream.getTracks().forEach(t => t.stop()); // Close it immediately
+            } catch (e) {
+                console.warn("Permission denied or no cameras found", e);
+                grid.innerHTML = '<p style="color:red;">Please grant camera permissions to scan for USB hardware.</p>';
+                return;
+            }
 
             const devs = await navigator.mediaDevices.enumerateDevices();
             const videoInputs = devs.filter(d => d.kind === 'videoinput');
 
+            // SORTING: Prioritize physical hardware over virtual cameras
+            videoInputs.sort((a, b) => {
+                const aName = (a.label || "").toLowerCase();
+                const bName = (b.label || "").toLowerCase();
+                const aVirtual = aName.includes('virtual') || aName.includes('camo') || aName.includes('snap');
+                const bVirtual = bName.includes('virtual') || bName.includes('camo') || bName.includes('snap');
+                if (aVirtual && !bVirtual) return 1;
+                if (!aVirtual && bVirtual) return -1;
+                return 0;
+            });
+
+            grid.innerHTML = '';
             if (videoInputs.length === 0) {
-                grid.innerHTML = '<p>No cameras found.</p>';
+                grid.innerHTML = '<p>No cameras found. Ensure your USB cameras are connected.</p>';
                 return;
             }
 
@@ -65,89 +84,79 @@
 
         function createCard(device, index) {
             const id = device.deviceId;
-            const name = device.label || `USB Camera ${index + 1}`;
+            const name = device.label || `Camera ${index + 1}`;
+            const isVirtual = name.toLowerCase().includes('virtual') || name.toLowerCase().includes('camo') || name.toLowerCase().includes('snap');
             
             const card = document.createElement('div');
-            card.className = 'cam-card';
+            card.className = 'cam-card' + (isVirtual ? ' is-virtual' : '');
             card.innerHTML = `
                 <div class="cam-header">
-                    <span style="font-weight:bold;">${name}</span>
-                    <span class="status-badge">Ready</span>
+                    <div>
+                        <span style="font-weight:bold;">${name}</span>
+                        ${isVirtual ? '<span style="font-size:9px; color:#888; margin-left:5px;">(Virtual)</span>' : ''}
+                    </div>
+                    <span class="id-badge" id="sid-${index}">Offline</span>
                 </div>
-                <div class="cam-preview" onclick="openRemote('${id}')">
-                    <video id="vid-${id}" autoplay muted playsinline></video>
+                <div class="cam-preview">
+                    <video id="vid-${index}" autoplay muted playsinline></video>
                     <div class="status-overlay">
-                        <div id="rec-${id}" class="rec-dot"></div>
-                        <span id="stat-${id}">IDLE</span>
+                        <div id="rec-${index}" class="rec-dot"></div>
+                        <span id="stat-${index}">STANDBY</span>
                     </div>
                 </div>
                 <div class="cam-controls">
-                    <button class="btn btn-sm" onclick="toggleCamera('${id}')" id="btn-${id}">Start</button>
+                    <button class="btn btn-sm" onclick="toggleCamera(${index}, '${id}', '${name.replace(/'/g, "\'")}')" id="btn-${index}">Start Camera</button>
+                    <button class="btn btn-sm hidden" id="remote-btn-${index}">Open Remote</button>
                 </div>
             `;
             grid.appendChild(card);
-
-            // Initialize Session
-            const videoEl = card.querySelector('video');
-            const statusEl = card.querySelector(`#stat-${id}`);
-            const recEl = card.querySelector(`#rec-${id}`);
-            const btnEl = card.querySelector(`#btn-${id}`);
-
-            // ForceNew=true ensures a unique socket for this camera
-            const socket = io({ forceNew: true, transports: ['polling'] });
-            
-            // We need to fetch the socket ID once it connects to know what ID to pass to the remote
-            // The camera core emits 'join-camera', we can grab the socket id from the instance
-            
-            const session = new CameraSession(socket, videoEl, statusEl, recEl, name);
-            
-            // Store session
-            sessions.push({ id, session, btn: btnEl, active: false });
         }
 
-        function openRemote(deviceId) {
-            const item = sessions.find(s => s.id === deviceId);
-            if (item && item.session.socket.id) {
-                const socketId = item.session.socket.id;
-                window.open(`remote.html?cam=${socketId}`, '_blank');
-            } else {
-                alert("Please start the camera first.");
+        async function toggleCamera(index, deviceId, name) {
+            const btn = document.getElementById(`btn-${index}`);
+            const remoteBtn = document.getElementById(`remote-btn-${index}`);
+            const videoEl = document.getElementById(`vid-${index}`);
+            const statusEl = document.getElementById(`stat-${index}`);
+            const recEl = document.getElementById(`rec-${index}`);
+            const sidEl = document.getElementById(`sid-${index}`);
+
+            if (sessionMap.has(index)) {
+                location.reload(); // Hard reset
+                return;
+            }
+
+            btn.innerText = "Initializing...";
+            btn.disabled = true;
+
+            try {
+                // IMPORTANT: Create socket ONLY when starting
+                const socket = io({ forceNew: true, transports: ['websocket', 'polling'], reconnection: true });
+                
+                socket.on('connect', () => {
+                    sidEl.innerText = socket.id.substr(0, 8);
+                    sidEl.style.color = '#0a84ff';
+                    remoteBtn.classList.remove('hidden');
+                    remoteBtn.onclick = () => window.open(`remote.html?cam=${socket.id}`, '_blank');
+                });
+
+                const session = new CameraSession(socket, videoEl, statusEl, recEl, name);
+                sessionMap.set(index, session);
+                
+                const maxRes = await session.probeMaxResolution(deviceId);
+                await session.start({ deviceId: deviceId, resolution: maxRes });
+                
+                btn.innerText = "Stop (Reload)";
+                btn.disabled = false;
+                btn.style.background = "#cc0000";
+
+            } catch (e) {
+                console.error(e);
+                btn.innerText = "Error";
+                btn.disabled = false;
+                statusEl.innerText = "ERR";
             }
         }
 
-        async function toggleCamera(id) {
-            const item = sessions.find(s => s.id === id);
-            if (!item) return;
-
-            if (item.active) {
-                // Stop
-                // Currently CameraSession doesn't have a full 'stop' method that clears stream
-                // We'll just reload the page or impl a stop later. 
-                // For now, simpler to just allow starting.
-                alert("Already running. Refresh to stop.");
-            } else {
-                item.btn.innerText = "Scanning...";
-                item.btn.disabled = true;
-                
-                // Auto Detect Max Resolution
-                const maxRes = await item.session.probeMaxResolution(id);
-                console.log(`[${item.session.name}] Max Res: ${maxRes}p`);
-                
-                await item.session.start({ deviceId: id, resolution: maxRes });
-                
-                item.active = true;
-                item.btn.innerText = "Running";
-                item.btn.style.background = "#228b22";
-            }
-        }
-
-        function startAll() {
-            sessions.forEach(s => {
-                if (!s.active) toggleCamera(s.id);
-            });
-        }
-
-        // Auto scan on load
         scanDevices();
     </script>
 </body>

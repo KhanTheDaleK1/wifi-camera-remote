@@ -6,6 +6,7 @@
     <title>OBS Multi-View</title>
     <style>
         body, html { margin: 0; padding: 0; background: #000; width: 100%; height: 100%; overflow: hidden; }
+        .splash { position: fixed; z-index: 100; background: #000; display: flex; flex-direction: column; justify-content: center; align-items: center; width: 100%; height: 100%; color: white; font-family: sans-serif; }
         .grid { 
             display: grid; 
             grid-template-columns: repeat(auto-fit, minmax(50%, 1fr)); 
@@ -19,34 +20,38 @@
             background: rgba(0,0,0,0.7); color: white; padding: 4px 8px; 
             font-family: sans-serif; font-size: 14px; border-radius: 4px;
         }
-
-        /* Fullscreen / Program Mode */
-        .grid.program-mode {
-            grid-template-columns: 1fr;
-            grid-template-rows: 1fr;
-        }
         .grid.program-mode .cam-container { display: none; border: none; }
         .grid.program-mode .cam-container.active { display: block; }
+        .btn-start { background: #0a84ff; color: white; border: none; padding: 15px 30px; border-radius: 8px; font-size: 18px; cursor: pointer; }
     </style>
 </head>
 <body>
+    <div id="splash" class="splash">
+        <h1>OBS Studio View</h1>
+        <button class="btn-start" onclick="startView()">START MULTI-VIEW</button>
+        <p style="color: #666; font-size: 12px; margin-top: 10px;">Enables Audio/Video Autoplay</p>
+    </div>
+
     <div id="grid" class="grid"></div>
 
     <script src="https://cdn.socket.io/4.7.2/socket.io.min.js"></script>
     <script>
-        const socket = io({ transports: ['polling'], reconnection: true });
+        const socket = io({ transports: ['websocket', 'polling'], reconnection: true, autoConnect: false });
         const grid = document.getElementById('grid');
-        const peers = {}; // { socketId: RTCPeerConnection }
-        let currentProgram = 'grid'; // 'grid' or socketId
+        const peers = {}; 
+        let currentProgram = 'grid'; 
+
+        function startView() {
+            document.getElementById('splash').style.display = 'none';
+            socket.connect();
+        }
 
         socket.on('connect', () => {
             console.log('Connected to server');
             socket.emit('join-remote');
         });
 
-        // --- View Switching ---
         socket.on('program-change', (targetId) => {
-            console.log("Program Change:", targetId);
             currentProgram = targetId;
             updateLayout();
         });
@@ -55,34 +60,21 @@
             if (currentProgram === 'grid') {
                 grid.classList.remove('program-mode');
                 Array.from(grid.children).forEach(el => el.classList.remove('active'));
-                
-                // Restore grid math
-                const count = grid.children.length;
-                grid.style.gridTemplateColumns = count > 1 ? 'repeat(auto-fit, minmax(50%, 1fr))' : '1fr';
-                grid.style.gridTemplateRows = count > 2 ? '1fr 1fr' : '1fr';
             } else {
                 grid.classList.add('program-mode');
-                // Hide all, show target
                 Array.from(grid.children).forEach(el => {
                     if (el.id === `cam-${currentProgram}`) el.classList.add('active');
                     else el.classList.remove('active');
                 });
-                grid.style.gridTemplateColumns = '1fr';
-                grid.style.gridTemplateRows = '1fr';
             }
         }
 
-        // --- Camera Management ---
         function createVideoSlot(id, name) {
             if (document.getElementById(`cam-${id}`)) return;
-
             const div = document.createElement('div');
             div.className = 'cam-container';
             div.id = `cam-${id}`;
-            div.innerHTML = `
-                <video id="vid-${id}" autoplay playsinline></video>
-                <div class="label">${name || 'Camera ' + id.substr(0,4)}</div>
-            `;
+            div.innerHTML = `<video id="vid-${id}" autoplay playsinline muted></video><div class="label">${name || id.substr(0,4)}</div>`;
             grid.appendChild(div);
             updateLayout();
         }
@@ -106,13 +98,8 @@
 
         socket.on('camera-left', (c) => removeVideoSlot(c.id));
 
-        // --- WebRTC Logic ---
         socket.on('offer', async (data) => {
             const id = data.from;
-            const offer = data.payload;
-
-            createVideoSlot(id, "Connecting..."); // Ensure slot exists
-            
             if (peers[id]) peers[id].close();
             
             const p = new RTCPeerConnection({ iceServers: [{ urls: 'stun:stun.l.google.com:19302' }] });
@@ -120,10 +107,15 @@
 
             p.ontrack = e => { 
                 const v = document.getElementById(`vid-${id}`);
-                if (v) {
+                if (v && v.srcObject !== e.streams[0]) {
                     v.srcObject = e.streams[0];
-                    v.muted = false; // Audio on
-                    v.play().catch(console.error);
+                    v.muted = false; // OBS requires audio to verify stream usually, but keep muted if feedback
+                    // Avoid race conditions with play()
+                    if (v.paused) {
+                        v.play().catch(e => {
+                            if (e.name !== "AbortError") console.error("Play error:", e);
+                        });
+                    }
                 }
             };
 
@@ -131,17 +123,15 @@
                 if (e.candidate) socket.emit('remote-candidate', { target: id, payload: e.candidate }); 
             };
 
-            await p.setRemoteDescription(new RTCSessionDescription(offer));
+            await p.setRemoteDescription(new RTCSessionDescription(data.payload));
             const ans = await p.createAnswer();
             await p.setLocalDescription(ans);
-            
             socket.emit('answer', { target: id, payload: ans });
         });
 
         socket.on('camera-candidate', (data) => {
-            if (peers[data.from]) peers[data.from].addIceCandidate(new RTCIceCandidate(data.payload));
+            if (peers[data.from]) peers[data.from].addIceCandidate(new RTCIceCandidate(data.payload)).catch(e => {});
         });
-
     </script>
 </body>
 </html>

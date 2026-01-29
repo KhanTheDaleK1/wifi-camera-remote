@@ -1,5 +1,5 @@
 const socket = io({ 
-    transports: ['polling'],
+    transports: ['websocket', 'polling'],
     reconnection: true
 });
 
@@ -18,85 +18,82 @@ const els = {
     camSelect: document.getElementById('cam-select'),
     tetherBtn: document.getElementById('tether-btn'),
     audioBtn: document.getElementById('audio-btn'),
-    trackSelect: document.getElementById('track-select')
+    trackSelect: document.getElementById('track-select'),
+    flipBtn: document.querySelector('button[onclick*="switch-camera"]')
 };
 
 let peer, recording = false, torchState = false;
 let activeCamId = null;
 let tetherState = false;
-let audioState = false; // false = voice, true = pro
+let audioState = false; 
 let trackMode = 'off';
-
-// Check URL params for target camera
-const urlParams = new URLSearchParams(window.location.search);
-const targetCamId = urlParams.get('cam');
-if (targetCamId) {
-    console.log(`[Remote] Auto-targeting camera: ${targetCamId}`);
-}
+let connectionTimeout = null;
 
 // --- UI Interaction ---
-els.btn.onclick = () => {
-    els.start.classList.add('hidden');
-    socket.emit('join-remote');
-    els.video.play().catch(() => {});
-};
+if (els.btn) {
+    els.btn.onclick = () => {
+        els.start.classList.add('hidden');
+        socket.emit('join-remote');
+        els.video.play().catch(() => {});
+    };
+}
+
+// Intercept the inline flip button
+if (els.flipBtn) {
+    els.flipBtn.onclick = (e) => {
+        e.preventDefault();
+        sendCmd('switch-camera');
+    };
+}
 
 function sendCmd(cmd, payload = {}) {
     if (!activeCamId) return;
     socket.emit(cmd, { target: activeCamId, payload });
 }
 
-// --- Connection ---
 socket.on('connect', () => {
     els.status.innerText = "Connected";
     socket.emit('join-remote');
 });
 
-socket.on('disconnect', () => {
-    els.status.innerText = "Reconnecting...";
-    if (peer) peer.close();
-});
-
 // --- Camera Selection ---
 socket.on('camera-list', (cameras) => {
-    const savedId = activeCamId;
-    els.camSelect.innerHTML = cameras.map(c => `<option value="${c.id}">${c.meta.name || c.id.substr(0,4)}</option>`).join('');
-    
-    if (cameras.length > 0) {
-        // Priority 1: URL Parameter (First load)
-        if (targetCamId && cameras.find(c => c.id === targetCamId)) {
-             if (activeCamId !== targetCamId) {
-                 activeCamId = targetCamId;
-                 els.camSelect.value = activeCamId;
-                 connectToCamera(activeCamId);
-                 
-                 // Auto-hide start screen if deep-linked
-                 if (!els.start.classList.contains('hidden')) {
-                     els.start.classList.add('hidden');
-                     els.video.play().catch(() => {});
-                 }
-             }
+    const uniqueCams = [];
+    const seen = new Set();
+    cameras.forEach(c => {
+        if (!seen.has(c.id)) {
+            seen.add(c.id);
+            uniqueCams.push(c);
         }
-        // Priority 2: Restore previous selection
-        else if (savedId && cameras.find(c => c.id === savedId)) {
-            els.camSelect.value = savedId;
-        } 
-        // Priority 3: Default to first
-        else {
-            if (!activeCamId) { // Only change if we have nothing selected
-                activeCamId = cameras[0].id;
-                els.camSelect.value = activeCamId;
-                connectToCamera(activeCamId);
-            }
+    });
+
+    els.camSelect.innerHTML = uniqueCams.map(c => `<option value="${c.id}">${c.meta.name || c.id.substr(0,4)}</option>`).join('');
+    
+    if (uniqueCams.length > 0) {
+        if (!activeCamId || !uniqueCams.find(c => c.id === activeCamId)) { 
+            activeCamId = uniqueCams[0].id;
+            els.camSelect.value = activeCamId;
+            connectToCamera(activeCamId);
         }
     } else {
-        els.camSelect.innerHTML = '<option>No Cameras</option>';
+        els.camSelect.innerHTML = '<option>No Cameras Online</option>';
         activeCamId = null;
+        els.status.innerText = "Waiting for Camera...";
     }
 });
 
-socket.on('camera-joined', () => socket.emit('join-remote')); 
-socket.on('camera-left', () => socket.emit('join-remote'));
+socket.on('camera-joined', () => {
+    if (!activeCamId) socket.emit('join-remote');
+});
+
+socket.on('camera-left', (d) => {
+    if (d.id === activeCamId) {
+        els.status.innerText = "Camera Disconnected";
+        if (peer) peer.close();
+        activeCamId = null;
+    }
+    socket.emit('join-remote');
+});
 
 els.camSelect.onchange = () => {
     activeCamId = els.camSelect.value;
@@ -104,47 +101,43 @@ els.camSelect.onchange = () => {
 };
 
 function connectToCamera(id) {
-    if (peer) peer.close();
+    if (peer) { peer.close(); peer = null; }
     els.status.innerText = "Requesting Stream...";
-    console.log("[Remote] Requesting state from", id);
-    socket.emit('request-state', { target: id });
+    els.status.style.color = "white";
     
-    // Restore states
+    if (connectionTimeout) clearTimeout(connectionTimeout);
+    connectionTimeout = setTimeout(() => {
+        if (els.status.innerText === "Requesting Stream...") {
+            els.status.innerHTML = `Not Responding <button onclick="connectToCamera('${id}')" style="font-size:9px; padding:2px 4px;">Retry</button>`;
+            els.status.style.color = "#ff9f0a";
+        }
+    }, 8000);
+
+    socket.emit('request-state', { target: id });
     sendCmd('set-tether', tetherState);
     sendCmd('set-audio-mode', audioState ? 'pro' : 'voice');
     sendCmd('set-track-mode', trackMode);
 }
 
-// --- WebRTC Logic (Multi-Cam Aware) ---
+// --- WebRTC Logic ---
 socket.on('offer', async (data) => {
     if (data.from !== activeCamId) return; 
-    console.log("[Remote] Offer Received");
+    if (connectionTimeout) clearTimeout(connectionTimeout);
     els.status.innerText = "Negotiating...";
 
     if (peer) peer.close();
     peer = new RTCPeerConnection({ iceServers: [{ urls: 'stun:stun.l.google.com:19302' }] });
     
     peer.oniceconnectionstatechange = () => {
-        console.log("[Remote] ICE State:", peer.iceConnectionState);
-        els.status.innerText = `ICE: ${peer.iceConnectionState}`;
-        if (peer.iceConnectionState === 'connected') {
-            els.status.innerText = "Connected";
+        if (peer.iceConnectionState === 'connected' || peer.iceConnectionState === 'completed') {
+            els.status.innerText = "Live";
             els.status.style.color = "#00cc00";
-        }
-        if (peer.iceConnectionState === 'failed') {
-            els.status.innerText = "Connection Failed (Firewall?)";
-            els.status.style.color = "red";
         }
     };
 
     peer.ontrack = async (e) => { 
-        console.log("[Remote] Track Received");
         els.video.srcObject = e.streams[0]; 
-        try {
-            await els.video.play();
-        } catch (err) {
-            if (err.name !== 'AbortError') console.error("Autoplay blocked:", err);
-        }
+        els.video.play().catch(() => {});
     };
     
     peer.onicecandidate = e => { 
@@ -156,16 +149,14 @@ socket.on('offer', async (data) => {
         const a = await peer.createAnswer();
         await peer.setLocalDescription(a);
         socket.emit('answer', { target: activeCamId, payload: a });
-        console.log("[Remote] Answer Sent");
     } catch (e) {
-        console.error("[Remote] Signaling Error:", e);
         els.status.innerText = "Signal Error";
     }
 });
 
 socket.on('camera-candidate', (data) => {
     if (data.from === activeCamId && peer) {
-        peer.addIceCandidate(new RTCIceCandidate(data.payload));
+        peer.addIceCandidate(new RTCIceCandidate(data.payload)).catch(() => {});
     }
 });
 
@@ -187,10 +178,19 @@ socket.on('camera-capabilities', (d) => {
 
 socket.on('camera-state', d => {
     if (d.from !== activeCamId) return;
-    recording = (d.payload === 'recording');
+    const payload = d.payload;
+    if (typeof payload === 'object') {
+        recording = (payload.state === 'recording');
+        if (payload.settings) {
+            if (payload.settings.resolution) els.res.value = payload.settings.resolution;
+            if (payload.settings.fps) els.fps.value = payload.settings.fps;
+        }
+    } else {
+        recording = (payload === 'recording');
+    }
     els.shutter.classList.toggle('recording', recording);
-    els.status.innerText = recording ? "REC" : "Ready";
-    els.status.style.color = recording ? "red" : "white";
+    els.status.innerText = recording ? "REC" : "Live";
+    els.status.style.color = recording ? "red" : "#00cc00";
 });
 
 // --- Controls ---
@@ -218,7 +218,10 @@ els.trackSelect.onchange = () => {
 els.lensSelect.onchange = () => sendCmd('switch-lens', els.lensSelect.value);
 els.res.onchange = () => sendCmd('control-camera', { resolution: parseInt(els.res.value) });
 els.fps.onchange = () => sendCmd('control-camera', { frameRate: parseInt(els.fps.value) });
-els.zoom.oninput = () => sendCmd('control-camera', { zoom: parseFloat(els.zoom.value) });
+els.zoom.oninput = () => {
+    document.getElementById('zoom-val').innerText = parseFloat(els.zoom.value).toFixed(1);
+    sendCmd('control-camera', { zoom: parseFloat(els.zoom.value) });
+};
 els.focus.oninput = () => sendCmd('control-camera', { focusDistance: parseFloat(els.focus.value) });
 els.torch.onclick = () => {
     torchState = !torchState;

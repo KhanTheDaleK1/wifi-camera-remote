@@ -12,9 +12,10 @@
     </div>
     <h1>WiFi Camera Remote</h1>
     <div style="margin-top: 30px; display: flex; gap: 20px; flex-wrap: wrap; justify-content: center;">
-        <a href="camera.html" class="btn btn-primary" style="text-decoration:none;">Start Phone Camera</a>
+        <a href="studio.html" class="btn btn-primary" style="text-decoration:none; background: #0a84ff; border-color:#0a84ff;">STUDIO MASTER HUB</a>
+        <a href="camera.html" class="btn" style="text-decoration:none;">Start Phone Camera</a>
         <a href="remote.html" class="btn" style="text-decoration:none;">Open Remote</a>
-        <a href="host.html" class="btn" style="text-decoration:none; background: #222;">Host Hub (USB Cams)</a>
+        <a href="recordings.html" class="btn" style="text-decoration:none; background: #222;">View Recordings</a>
     </div>
     
     <div id="qr-container" style="margin-top: 40px; background: white; padding: 10px; border-radius: 10px;">
@@ -22,11 +23,20 @@
     </div>
     <p id="url" style="color: #888; margin-top: 10px; font-family: monospace;"></p>
 
+    <div id="usb-hint" style="margin-top: 20px; font-size: 12px; color: #aaa; background: #222; padding: 10px; border-radius: 8px; max-width: 300px;">
+        💡 <b>Pro Tip:</b> For zero-lag and high-res USB saving, connect your iPhone via USB and turn on <b>Personal Hotspot</b>. Then scan the QR code again.
+    </div>
+
     <script>
-        fetch('/network-info').then(r => r.json()).then(d => {
-            document.getElementById('qr').src = d.qr;
-            document.getElementById('url').innerText = d.url;
-        });
+        function loadNetworkInfo() {
+            fetch('/network-info').then(r => r.json()).then(d => {
+                document.getElementById('qr').src = d.qr;
+                document.getElementById('url').innerText = d.url;
+            });
+        }
+        loadNetworkInfo();
+        // Check for new IPs periodically (e.g. if USB is plugged in)
+        setInterval(loadNetworkInfo, 5000);
     </script>
 </body>
 </html>

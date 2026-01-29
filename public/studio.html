@@ -1,0 +1,196 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Studio Master Grid</title>
+    <link rel="stylesheet" href="css/style.css">
+    <style>
+        body { padding: 20px; overflow: auto; background: #000; }
+        .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(400px, 1fr)); gap: 20px; }
+        .cam-card { background: #111; border: 1px solid #333; border-radius: 12px; overflow: hidden; display: flex; flex-direction: column; transition: border-color 0.3s; }
+        .cam-card.online { border-color: #0a84ff; }
+        .cam-header { background: #222; padding: 12px; display: flex; justify-content: space-between; align-items: center; }
+        .cam-preview { width: 100%; aspect-ratio: 16/9; background: #000; position: relative; }
+        video { width: 100%; height: 100%; object-fit: contain; }
+        .status-overlay { position: absolute; bottom: 10px; left: 10px; background: rgba(0,0,0,0.7); padding: 4px 8px; border-radius: 4px; font-size: 11px; }
+        .cam-type { font-size: 9px; text-transform: uppercase; color: #888; letter-spacing: 1px; }
+        .btn-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 5px; padding: 10px; }
+        .rec-dot { width: 8px; height: 8px; background: #444; border-radius: 50%; display: inline-block; margin-right: 5px; }
+        .rec-dot.active { background: red; animation: pulse 1s infinite; }
+        @keyframes pulse { 0% { opacity: 1; } 50% { opacity: 0.5; } 100% { opacity: 1; } }
+    </style>
+</head>
+<body>
+    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 25px;">
+        <div>
+            <h1 style="margin:0;">Studio Master</h1>
+            <p style="color: #ff9f0a; font-size: 11px; margin: 5px 0 0 0;">Unified Control for USB & Remote Cameras</p>
+        </div>
+        <div style="display:flex; gap:10px;">
+            <button class="btn btn-sm" onclick="scanLocal()">Rescan USB</button>
+            <a href="index.html" class="btn btn-sm">Home</a>
+        </div>
+    </div>
+
+    <div id="grid" class="grid">
+        <!-- Unified cards will be here -->
+    </div>
+
+    <script src="https://cdn.socket.io/4.7.2/socket.io.min.js"></script>
+    <script src="js/camera-core.js"></script>
+
+    <script>
+        const socket = io({ transports: ['websocket', 'polling'] });
+        const grid = document.getElementById('grid');
+        const localSessions = new Map(); // deviceId -> session
+        const remotePeers = new Map(); // socketId -> RTCPeerConnection
+
+        // --- 1. REMOTE CAMERAS (iPhone, etc) ---
+        socket.on('connect', () => socket.emit('join-remote'));
+
+        socket.on('camera-list', (cams) => {
+            // Remove existing remote cards
+            Array.from(grid.querySelectorAll('.remote-cam')).forEach(el => el.remove());
+            cams.forEach(c => createRemoteCard(c.id, c.meta.name || "Remote Camera"));
+        });
+
+        socket.on('camera-joined', (c) => createRemoteCard(c.id, c.meta.name || "Remote Camera"));
+        socket.on('camera-left', (c) => {
+            const el = document.getElementById(`card-${c.id}`);
+            if (el) el.remove();
+        });
+
+        function createRemoteCard(id, name) {
+            if (document.getElementById(`card-${id}`)) return;
+            const card = document.createElement('div');
+            card.id = `card-${id}`;
+            card.className = 'cam-card remote-cam online';
+            card.innerHTML = '
+                <div class="cam-header">
+                    <div>
+                        <div class="cam-type">Wireless/Link</div>
+                        <span style="font-weight:bold;">${name}</span>
+                    </div>
+                    <span style="font-size:10px; color:#0a84ff;">● ONLINE</span>
+                </div>
+                <div class="cam-preview">
+                    <video id="vid-${id}" autoplay playsinline muted></video>
+                    <div class="status-overlay">
+                        <div id="rec-${id}" class="rec-dot"></div>
+                        <span id="stat-${id}">LIVE</span>
+                    </div>
+                </div>
+                <div class="btn-grid">
+                    <button class="btn btn-sm" onclick="window.open(\'remote.html?cam=${id}\\', \'_blank"]')">OPEN REMOTE</button>
+                    <button class="btn btn-sm" onclick="socket.emit('request-state', {target:'${id}'})">SYNC STREAM</button>
+                </div>
+            ';
+            grid.appendChild(card);
+            requestRemoteStream(id);
+        }
+
+        async function requestRemoteStream(id) {
+            socket.emit('request-state', { target: id });
+        }
+
+        socket.on('offer', async (data) => {
+            const id = data.from;
+            if (remotePeers.has(id)) remotePeers.get(id).close();
+            
+            const p = new RTCPeerConnection({ iceServers: [{ urls: 'stun:stun.l.google.com:19302' }] });
+            remotePeers.set(id, p);
+
+            p.ontrack = e => { 
+                const v = document.getElementById(`vid-${id}`);
+                if (v) v.srcObject = e.streams[0];
+            };
+            
+            p.onicecandidate = e => { 
+                if (e.candidate) socket.emit('remote-candidate', { target: id, payload: e.candidate }); 
+            };
+
+            await p.setRemoteDescription(new RTCSessionDescription(data.payload));
+            const ans = await p.createAnswer();
+            await p.setLocalDescription(ans);
+            socket.emit('answer', { target: id, payload: ans });
+        });
+
+        socket.on('camera-candidate', (data) => {
+            if (remotePeers.has(data.from)) remotePeers.get(data.from).addIceCandidate(new RTCIceCandidate(data.payload)).catch(() => {});
+        });
+
+        // --- 2. LOCAL USB CAMERAS ---
+        async function scanLocal() {
+            try {
+                const s = await navigator.mediaDevices.getUserMedia({ video: true });
+                s.getTracks().forEach(t => t.stop());
+            } catch(e) {}
+
+            const devs = await navigator.mediaDevices.enumerateDevices();
+            const videoInputs = devs.filter(d => d.kind === 'videoinput');
+
+            // Clear existing USB cards
+            Array.from(grid.querySelectorAll('.local-usb')).forEach(el => el.remove());
+
+            videoInputs.forEach((device, index) => {
+                createLocalCard(device, index);
+            });
+        }
+
+        function createLocalCard(device, index) {
+            const id = device.deviceId;
+            const name = device.label || `USB Camera ${index + 1}`;
+            const isVirtual = name.toLowerCase().includes('virtual') || name.toLowerCase().includes('camo') || name.toLowerCase().includes('snap');
+            
+            const card = document.createElement('div');
+            card.id = `usb-card-${index}`;
+            card.className = 'cam-card local-usb' + (isVirtual ? ' is-virtual' : '');
+            card.innerHTML = '
+                <div class="cam-header">
+                    <div>
+                        <div class="cam-type">USB Hardware</div>
+                        <span style="font-weight:bold;">${name}</span>
+                    </div>
+                    <span class="id-badge" id="sid-${index}">Offline</span>
+                </div>
+                <div class="cam-preview">
+                    <video id="usb-vid-${index}" autoplay muted playsinline></video>
+                    <div class="status-overlay">
+                        <div id="usb-rec-${index}" class="rec-dot"></div>
+                        <span id="usb-stat-${index}">STANDBY</span>
+                    </div>
+                </div>
+                <div class="btn-grid">
+                    <button class="btn btn-sm" onclick="startUSB(${index}, \'${id}\\' , \'${name.replace(/'/g, "\\'")}\')" id="usb-btn-${index}">START HOSTING</button>
+                    <button class="btn btn-sm hidden" id="usb-remote-${index}">REMOTE</button>
+                </div>
+            ';
+            grid.appendChild(card);
+        }
+
+        async function startUSB(index, deviceId, name) {
+            const btn = document.getElementById(`usb-btn-${index}`);
+            const remoteBtn = document.getElementById(`usb-remote-${index}`);
+            const videoEl = document.getElementById(`usb-vid-${index}`);
+            const sidEl = document.getElementById(`sid-${index}`);
+
+            const localSocket = io({ forceNew: true, transports: ['polling'] });
+            localSocket.on('connect', () => {
+                sidEl.innerText = localSocket.id.substr(0, 6);
+                remoteBtn.classList.remove('hidden');
+                remoteBtn.onclick = () => window.open(`remote.html?cam=${localSocket.id}`, '_blank');
+            });
+
+            const session = new CameraSession(localSocket, videoEl, null, null, name);
+            const maxRes = await session.probeMaxResolution(deviceId);
+            await session.start({ deviceId: deviceId, resolution: maxRes });
+            
+            btn.disabled = true; btn.innerText = "HOSTING";
+            document.getElementById(`usb-card-${index}`).classList.add('online');
+        }
+
+        scanLocal();
+    </script>
+</body>
+</html>
