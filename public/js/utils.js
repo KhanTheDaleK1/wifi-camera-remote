@@ -13,9 +13,22 @@ window.Logger = {
         const oldLog = console.log;
         const oldErr = console.error;
         
+        const safeStringify = (obj) => {
+            try {
+                const seen = new WeakSet();
+                return JSON.stringify(obj, (key, value) => {
+                    if (typeof value === "object" && value !== null) {
+                        if (seen.has(value)) return;
+                        seen.add(value);
+                    }
+                    return value;
+                });
+            } catch (e) { return '[Circular/Error]'; }
+        };
+
         console.log = (...args) => {
             oldLog.apply(console, args);
-            const msg = args.map(a => (typeof a === 'object' ? JSON.stringify(a) : String(a))).join(' ');
+            const msg = args.map(a => (typeof a === 'object' ? safeStringify(a) : String(a))).join(' ');
             if (debugEl) {
                 const line = document.createElement('div');
                 line.innerText = `> ${msg}`;
@@ -27,7 +40,7 @@ window.Logger = {
         
         console.error = (...args) => {
             oldErr.apply(console, args);
-            const msg = args.map(a => (typeof a === 'object' ? JSON.stringify(a) : String(a))).join(' ');
+            const msg = args.map(a => (typeof a === 'object' ? safeStringify(a) : String(a))).join(' ');
             if (debugEl) {
                 const line = document.createElement('div');
                 line.style.color = 'red';

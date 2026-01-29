@@ -1,6 +1,6 @@
 {
-  "short_name": "ProCam",
-  "name": "WiFi Pro Camera",
+  "short_name": "WiFiCam",
+  "name": "WiFi Camera",
   "icons": [
     {
       "src": "icons/icon-192.png",

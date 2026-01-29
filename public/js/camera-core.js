@@ -68,6 +68,8 @@ class SmartTracker {
         this.mode = 'off'; 
         this.canvas = document.createElement('canvas');
         this.ctx = this.canvas.getContext('2d');
+        this.ctx.imageSmoothingEnabled = true;
+        this.ctx.imageSmoothingQuality = 'high';
         
         // AI Input Optimization
         this.aiCanvas = document.createElement('canvas');
@@ -85,30 +87,65 @@ class SmartTracker {
     }
 
     async load() {
-        if (window.tf) {
-            await tf.setBackend('webgl').catch(() => tf.setBackend('cpu'));
-            await tf.ready();
+        try {
+            if (window.tf) {
+                await tf.setBackend('webgl').catch(() => tf.setBackend('cpu'));
+                await tf.ready();
+            }
+            if (!this.models.face && window.blazeface) {
+                console.log("[AI] Loading Face Model...");
+                try {
+                    this.models.face = await blazeface.load();
+                    console.log("[AI] Face Model Loaded");
+                } catch (e) { console.error("[AI] Face Model Failed:", e); }
+            }
+            if (!this.models.object && window.cocoSsd) {
+                console.log("[AI] Loading Object Model...");
+                try {
+                    this.models.object = await cocoSsd.load({ base: 'lite_mobilenet_v2' });
+                    console.log("[AI] Object Model Loaded");
+                } catch (e) { console.error("[AI] Object Model Failed:", e); }
+            }
+        } catch (e) {
+            console.error("[AI] Model Init Error:", e);
         }
-        if (!this.models.face && window.blazeface) this.models.face = await blazeface.load();
-        if (!this.models.object && window.cocoSsd) this.models.object = await cocoSsd.load({ base: 'lite_mobilenet_v2' });
     }
 
     setMode(mode) { this.mode = mode; }
     setDigitalZoom(level) { this.manualZoom = level; }
 
     start(videoEl, originalStream) {
+        // Prevent multiple loops if already active
+        if (this.isActive) {
+            // Just update source if it changed
+            if (this.internalSource && this.internalSource.srcObject !== originalStream) {
+                this.internalSource.srcObject = originalStream;
+                this.internalSource.play().catch(() => {});
+            }
+            return this.canvas.captureStream(30);
+        }
+
         this.isActive = true;
         
-        // 1. Setup Private Source (Hidden)
+        // 1. Setup Private Source (Hidden but in DOM for iOS)
         if (!this.internalSource) {
             this.internalSource = document.createElement('video');
             this.internalSource.autoplay = true;
             this.internalSource.muted = true;
             this.internalSource.playsInline = true;
-            this.internalSource.style.display = 'none';
+            // iOS requires element to be in DOM and not "display:none" for video processing
+            this.internalSource.style.position = 'fixed';
+            this.internalSource.style.top = '0';
+            this.internalSource.style.left = '0';
+            this.internalSource.style.width = '1px';
+            this.internalSource.style.height = '1px';
+            this.internalSource.style.opacity = '0.01';
+            this.internalSource.style.pointerEvents = 'none';
+            this.internalSource.style.zIndex = '-1';
+            document.body.appendChild(this.internalSource);
         }
         this.internalSource.srcObject = originalStream;
-        this.internalSource.play().catch(() => {});
+        this.internalSource.play().catch(e => console.error("[AI] Internal Play Error:", e));
 
         // 2. Sync Dimensions
         const s = originalStream.getVideoTracks()[0].getSettings();
@@ -134,9 +171,25 @@ class SmartTracker {
         this.detecting = true;
         let box = null;
 
-        // Resize frame to tiny AI canvas for speed
+        // --- Center-Crop logic for AI Input (300x300) ---
+        // Prevents squashing/stretching which breaks AI models
         if (this.internalSource.readyState >= 2) {
-            this.aiCtx.drawImage(this.internalSource, 0, 0, 300, 300);
+            const vw = this.internalSource.videoWidth;
+            const vh = this.internalSource.videoHeight;
+            const size = Math.min(vw, vh);
+            const sx = (vw - size) / 2;
+            const sy = (vh - size) / 2;
+            
+            // Draw a square center-cropped portion of the video into the 300x300 AI canvas
+            this.aiCtx.drawImage(this.internalSource, sx, sy, size, size, 0, 0, 300, 300);
+            
+            // Map detected coordinates back to original stream coordinates
+            this.aiCoordMap = { offset: { x: sx, y: sy }, scale: size / 300 };
+        } else {
+            // Debug stream issues
+            // console.warn("[AI] Source Not Ready", this.internalSource.readyState);
+            this.detecting = false; 
+            return;
         }
 
         if (this.mode !== 'off') {
@@ -144,28 +197,36 @@ class SmartTracker {
                 if (this.mode === 'face' && this.models.face) {
                     const faces = await this.models.face.estimateFaces(this.aiCanvas, false);
                     if (faces.length > 0) {
+                        console.log(`[AI] Found Face (Conf: ${faces[0].probability[0].toFixed(2)})`);
                         const f = faces[0];
-                        const scaleX = this.canvas.width / 300;
-                        const scaleY = this.canvas.height / 300;
+                        const m = this.aiCoordMap;
+                        // Calculate box in original pixel space
                         box = { 
-                            x: f.topLeft[0] * scaleX, 
-                            y: f.topLeft[1] * scaleY, 
-                            w: (f.bottomRight[0] - f.topLeft[0]) * scaleX, 
-                            h: (f.bottomRight[1] - f.topLeft[1]) * scaleY 
+                            x: m.offset.x + (f.topLeft[0] * m.scale), 
+                            y: m.offset.y + (f.topLeft[1] * m.scale), 
+                            w: (f.bottomRight[0] - f.topLeft[0]) * m.scale, 
+                            h: (f.bottomRight[1] - f.topLeft[1]) * m.scale 
                         };
                     }
                 } else if (this.models.object) {
                     const preds = await this.models.object.detect(this.aiCanvas);
-                    const filtered = preds.filter(p => p.score > 0.4 && (this.mode === 'body' ? p.class === 'person' : p.class !== 'person'));
+                    const filtered = preds.filter(p => p.score > 0.4 && (this.mode === 'body' ? p.class === 'person' : true));
+                    
                     if (filtered.length > 0) {
                         filtered.sort((a,b) => (b.bbox[2]*b.bbox[3]) - (a.bbox[2]*a.bbox[3]));
+                        console.log(`[AI] Found ${filtered[0].class} (Conf: ${filtered[0].score.toFixed(2)})`);
+                        
                         const [x, y, w, h] = filtered[0].bbox;
-                        const scaleX = this.canvas.width / 300;
-                        const scaleY = this.canvas.height / 300;
-                        box = { x: x * scaleX, y: y * scaleY, w: w * scaleX, h: h * scaleY };
+                        const m = this.aiCoordMap;
+                        box = { 
+                            x: m.offset.x + (x * m.scale), 
+                            y: m.offset.y + (y * m.scale), 
+                            w: w * m.scale, 
+                            h: h * m.scale 
+                        };
                     }
                 }
-            } catch(e) {}
+            } catch(e) { console.error("[AI Error]", e); }
         }
 
         if (box) {
@@ -199,19 +260,29 @@ class SmartTracker {
         this.vCam.h += (this.target.h - this.vCam.h) * f;
 
         try { 
+            // Ensure we don't try to draw outside the source video dimensions
+            const maxW = this.internalSource.videoWidth;
+            const maxH = this.internalSource.videoHeight;
+            
+            // Dynamic Resize: If source changes (rotation/quality switch), update canvas
+            if (maxW && maxH && (this.canvas.width !== maxW || this.canvas.height !== maxH)) {
+                this.canvas.width = maxW;
+                this.canvas.height = maxH;
+                // Reset view to full frame on resize
+                this.vCam = { x: 0, y: 0, w: maxW, h: maxH };
+                this.target = { ...this.vCam };
+            }
+            
             // Clamp coordinates to prevent "Source bounds" errors which cause black screens
             const sx = Math.max(0, this.vCam.x);
             const sy = Math.max(0, this.vCam.y);
-            // Ensure we don't try to draw outside the source video dimensions
-            const maxW = this.internalSource.videoWidth || 1920;
-            const maxH = this.internalSource.videoHeight || 1080;
             
             const sw = Math.min(this.vCam.w, maxW - sx);
             const sh = Math.min(this.vCam.h, maxH - sy);
 
             if (this.manualZoom > 1.0) {
                  // Debug only when zoomed in to avoid spam
-                 console.log(`[Zoom Debug] In: ${sx.toFixed(1)},${sy.toFixed(1)} ${sw.toFixed(1)}x${sh.toFixed(1)} | Max: ${maxW}x${maxH} | Ready: ${this.internalSource.readyState} | Canvas: ${this.canvas.width}x${this.canvas.height}`);
+                 // console.log(`[Zoom Debug] In: ${sx.toFixed(1)},${sy.toFixed(1)} ${sw.toFixed(1)}x${sh.toFixed(1)} | Max: ${maxW}x${maxH} | Ready: ${this.sourceVideo.readyState} | Canvas: ${this.canvas.width}x${this.canvas.height}`);
             }
 
             // Ensure canvas has valid dimensions
@@ -240,12 +311,20 @@ class CameraSession {
         this.statusEl = statusEl;
         this.recEl = recEl;
         this.name = name || 'Camera';
+        
+        // --- Initialize Remote Logging ---
+        if (window.Logger) {
+            window.Logger.init(socket, this.name);
+            console.log(`[${this.name}] Remote Logger Active`);
+        }
+
         this.stream = null;
         this.track = null;
         this.peers = {};
         this.uploader = new UploadManager(socket, (m) => { if(this.statusEl) this.statusEl.innerText = m; });
         this.tracker = new SmartTracker();
         this.settings = { deviceId: null, facingMode: 'environment', resolution: 1080, fps: 30, saveToHost: false, trackMode: 'off' };
+        this.nativeAspectRatio = null; // Store native ratio to prevent cropping
         this.init();
     }
 
@@ -271,6 +350,37 @@ class CameraSession {
             
             let caps = {};
             if (this.track && this.track.getCapabilities) caps = this.track.getCapabilities();
+            
+            // --- Enhanced Capability Discovery ---
+            // 1. Determine Max Height (Resolution)
+            let maxHeight = 720; // Safe default
+            if (caps.height && caps.height.max) {
+                maxHeight = caps.height.max;
+            } else if (this.stream) {
+                // Fallback: use current stream size as "known good"
+                const s = this.stream.getVideoTracks()[0].getSettings();
+                if (s.height) maxHeight = s.height;
+            }
+
+            // 2. Generate Supported Resolutions List
+            const standardRes = [720, 1080, 1440, 2160];
+            const supportedRes = standardRes.filter(r => r <= maxHeight);
+            // Ensure the current max is included if it's weird (like 1200)
+            if (!supportedRes.includes(maxHeight) && maxHeight > 480) supportedRes.push(maxHeight);
+            supportedRes.sort((a,b) => a - b);
+
+            // 3. Detect Aspect Ratio
+            let aspectRatio = 1.77; // Default 16:9
+            if (this.videoEl && this.videoEl.videoWidth) {
+                aspectRatio = this.videoEl.videoWidth / this.videoEl.videoHeight;
+            } else if (caps.aspectRatio && caps.aspectRatio.max) {
+                aspectRatio = caps.aspectRatio.max;
+            }
+
+            // Inject into caps object for Remote to use
+            caps.supportedResolutions = supportedRes;
+            caps.detectedAspectRatio = aspectRatio;
+
             if (!caps.zoom) caps.zoom = { min: 1, max: 4, step: 0.1 }; // Virtual Zoom
             this.socket.emit('camera-capabilities', caps);
             
@@ -348,25 +458,45 @@ class CameraSession {
         Object.assign(this.settings, up);
         if (this.stream) this.stream.getTracks().forEach(t => t.stop());
         try {
+            // "No Crop" Strategy:
+            // Most mobile sensors are 4:3 natively. 
+            // If we ask for 16:9, we get a crop. 
+            // If we ask for 4:3, we get the full sensor.
+            const targetHeight = this.settings.resolution;
+            // 1.3333 = 4:3 Aspect Ratio
+            const targetWidth = Math.round(targetHeight * 1.3333333333);
+
             this.stream = await navigator.mediaDevices.getUserMedia({
                 video: { 
                     deviceId: this.settings.deviceId ? { exact: this.settings.deviceId } : undefined, 
                     facingMode: this.settings.deviceId ? undefined : this.settings.facingMode, 
-                    width: { ideal: 1920 }, 
-                    height: { ideal: this.settings.resolution }, 
+                    width: { ideal: targetWidth }, 
+                    height: { ideal: targetHeight }, 
                     frameRate: { ideal: this.settings.fps } 
                 },
                 audio: true
             });
+            
+            // Log what we actually got
+            const settings = this.stream.getVideoTracks()[0].getSettings();
+            console.log(`[Camera] Started: ${settings.width}x${settings.height} (${(settings.width/settings.height).toFixed(2)})`);
+
             this.videoEl.srcObject = this.stream;
             // FORCE PLAY: Ensure the video element is actually processing frames
-            this.videoEl.play().catch(e => console.error("Local play error:", e));
+            this.videoEl.play().catch(e => { 
+                // Ignore AbortError (interrupted by new load) which is harmless here
+                if (e.name !== 'AbortError' && !e.message.includes('interrupted')) {
+                    console.error("Local play error:", e);
+                }
+            });
             
             this.track = this.stream.getVideoTracks()[0];
             let out = this.stream;
             if (this.settings.trackMode !== 'off' || this.tracker.manualZoom > 1.0) { 
                 this.tracker.setMode(this.settings.trackMode); 
+                console.log(`[Tracker] Starting... Zoom: ${this.tracker.manualZoom}, Mode: ${this.settings.trackMode}`);
                 out = this.tracker.start(this.videoEl, this.stream); 
+                console.log(`[Tracker] Canvas Size: ${this.tracker.canvas.width}x${this.tracker.canvas.height}`);
                 // Display the zoomed/processed stream on the local preview
                 this.videoEl.srcObject = out;
             } else { 
@@ -374,7 +504,34 @@ class CameraSession {
                 this.videoEl.srcObject = this.stream; // Show raw feed if zoom is 1.0
             }
             this.refreshPeers(out);
-        } catch(e) { console.error(e); }
+        } catch(e) { 
+            console.error(e);
+            
+            // Fallback for OverconstrainedError (hardware can't meet ideal specs)
+            if (e.name === 'OverconstrainedError' || e.name === 'ConstraintNotSatisfiedError') {
+                console.warn(`[Camera] Constraints failed (Mode: ${this.settings.facingMode}, Res: ${this.settings.resolution}). Falling back to basic config...`);
+                try {
+                    this.stream = await navigator.mediaDevices.getUserMedia({
+                        video: true, // Auto-select best available
+                        audio: true
+                    });
+                    // Re-run setup with the fallback stream
+                    this.videoEl.srcObject = this.stream;
+                    this.videoEl.play().catch(() => {});
+                    this.track = this.stream.getVideoTracks()[0];
+                    // IMPORTANT: Don't recurse excessively, just setup tracker and peers
+                    let out = this.stream;
+                    if (this.settings.trackMode !== 'off' || this.tracker.manualZoom > 1.0) { 
+                        this.tracker.setMode(this.settings.trackMode); 
+                        out = this.tracker.start(this.videoEl, this.stream); 
+                        this.videoEl.srcObject = out;
+                    }
+                    this.refreshPeers(out);
+                } catch (retryErr) {
+                    console.error("Fallback also failed:", retryErr);
+                }
+            }
+        }
     }
 
     refreshPeers(stream = this.stream) {

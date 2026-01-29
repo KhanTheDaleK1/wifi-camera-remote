@@ -1,7 +1,7 @@
 {
   "name": "wifi-camera-remote",
   "version": "1.0.0",
-  "description": "Turn your smartphone into a high-quality, wireless webcam with professional controls and OBS integration.",
+  "description": "Turn your smartphone into a high-quality, wireless webcam with advanced controls and OBS integration.",
   "main": "src/index.js",
   "scripts": {
     "start": "node src/index.js",

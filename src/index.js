@@ -243,6 +243,8 @@ io.on('connection', (socket) => {
 
     socket.on('log', (data) => {
         console.log(`[${data.source}] [${data.level}] ${data.message}`);
+        // Forward logs to remote for debugging
+        io.to('remote').emit('remote-log', data);
     });
 
     socket.on('disconnect', () => {

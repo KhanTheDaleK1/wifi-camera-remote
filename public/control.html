@@ -3,183 +3,58 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Studio Dock</title>
-    <link rel="icon" href="icons/icon.svg">
+    <title>OBS Dock</title>
+    <link rel="stylesheet" href="css/style.css">
     <style>
-        :root {
-            --bg: #1a1a1a;
-            --ui-bg: #222;
-            --ui-border: #333;
-            --text: #eee;
-            --text-muted: #888;
-            --accent: #0a84ff;
-            --record: #ff3b30;
-        }
-
-        body { 
-            background: var(--bg); 
-            color: var(--text); 
-            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; 
-            margin: 0; padding: 10px; 
-            font-size: 12px;
-            user-select: none;
-        }
-
-        /* Utilities */
-        .flex { display: flex; align-items: center; gap: 8px; }
-        .col { flex-direction: column; align-items: stretch; }
-        .grow { flex-grow: 1; }
-        .hidden { display: none; }
-
-        /* Status Bar */
-        .status-bar {
-            background: #000;
-            padding: 4px;
-            border-radius: 4px;
-            margin-bottom: 10px;
-            border: 1px solid var(--ui-border);
-        }
-        .status-ind { 
-            width: 8px; height: 8px; border-radius: 50%; background: #444; margin: 0 4px;
-        }
-        .status-ind.connected { background: #00cc00; box-shadow: 0 0 5px #00cc00; }
-
-        /* Controls */
-        .panel { display: flex; flex-direction: column; gap: 10px; }
-        
-        .section-label { 
-            font-size: 10px; text-transform: uppercase; 
-            color: var(--text-muted); font-weight: bold; margin-bottom: 4px; 
-        }
-
-        /* Inputs */
-        select, button { 
-            background: var(--ui-bg); 
-            color: var(--text); 
-            border: 1px solid var(--ui-border); 
-            padding: 6px; 
-            border-radius: 4px; 
-            font-size: 11px;
-            cursor: pointer;
-        }
-        select:focus, button:focus { border-color: var(--accent); outline: none; }
-        button:hover { background: #333; }
-        
-        button.active { background: var(--accent); border-color: var(--accent); color: white; }
-        
-        button.rec { 
-            background: #cc0000; border-color: #aa0000; color: white; font-weight: bold; font-size: 12px; padding: 8px;
-        }
+        body { background: #1a1a1a; color: #eee; font-family: sans-serif; padding: 10px; overflow-y: auto; }
+        .panel { display: flex; flex-direction: column; gap: 8px; }
+        select, button { width: 100%; padding: 8px; background: #333; border: 1px solid #444; color: white; border-radius: 4px; cursor: pointer; }
+        button:hover { background: #444; }
+        button.active { background: #0a84ff; border-color: #0a84ff; }
+        button.rec { background: #cc0000; border-color: #aa0000; }
         button.rec.recording { background: #ff0000; animation: pulse 1.5s infinite; }
-        
-        input[type=range] {
-            -webkit-appearance: none; background: transparent; height: 16px; width: 100%;
-        }
-        input[type=range]::-webkit-slider-thumb {
-            -webkit-appearance: none; height: 12px; width: 12px; 
-            background: var(--accent); border-radius: 50%; margin-top: -4px;
-        }
-        input[type=range]::-webkit-slider-runnable-track {
-            height: 4px; background: #333; border-radius: 2px;
-        }
-
-        /* Feature Toggles (Checkbox style buttons) */
-        .toggle-row { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
-        .toggle-btn { 
-            text-align: center; padding: 6px; font-size: 10px; 
-            background: #252525; border: 1px solid #333; border-radius: 4px;
-        }
-        .toggle-btn.active { background: var(--accent); color: white; border-color: var(--accent); }
-
+        .row { display: flex; gap: 5px; }
+        .label { font-size: 10px; color: #888; text-transform: uppercase; margin-bottom: 2px; }
         @keyframes pulse { 0% { opacity: 1; } 50% { opacity: 0.6; } 100% { opacity: 1; } }
     </style>
 </head>
 <body>
-    <div class="status-bar flex">
-        <span style="color: #ff9f0a; font-weight: bold; font-size: 9px; padding-left: 5px;">ALPHA</span>
-        <select id="cam-select" class="grow" style="background:transparent; border:none; font-weight:bold;">
-            <option value="">Searching...</option>
-        </select>
-        <a href="recordings.html" target="_blank" style="text-decoration:none; font-size:9px; color:#aaa; margin-right:5px;">📁 REC</a>
-        <div id="conn-ind" class="status-ind"></div>
-    </div>
-
     <div class="panel">
-        <!-- Capture -->
-        <div class="flex">
-            <button id="rec-btn" class="rec grow">RECORD</button>
-            <button id="photo-btn" style="flex-grow:0.3;">SNAP</button>
+        <div>
+            <div class="label">Target Camera</div>
+            <select id="cam-select"><option>Scanning...</option></select>
         </div>
 
-        <!-- Smart Features -->
+        <div class="row">
+            <button id="rec-btn" class="rec">RECORD</button>
+            <button id="photo-btn">SNAP</button>
+        </div>
+
         <div>
-            <div class="section-label">Smart Features</div>
-            <div class="toggle-row">
-                <button id="tether-btn" class="toggle-btn">USB SAVE</button>
-                <button id="audio-btn" class="toggle-btn">HI-FI AUDIO</button>
-            </div>
-            <div class="flex" style="margin-top:8px;">
-                <label for="track-select" style="color:#888; font-size:10px; width:40px;">TRACK</label>
-                <select id="track-select" class="grow">
-                    <option value="off">OFF</option>
-                    <option value="face">Face (Head)</option>
-                    <option value="body">Body (Full)</option>
-                    <option value="object">Object (Hand/Product)</option>
-                </select>
+            <div class="label">Features</div>
+            <div class="row">
+                <button id="tether-btn" style="font-size:10px;">USB SAVE</button>
+                <button id="audio-btn" style="font-size:10px;">High-Fidelity Audio</button>
             </div>
         </div>
 
-        <!-- Lens & Image -->
         <div>
-            <div class="section-label">Lens & Image</div>
-            <div class="flex">
-                <select id="lens-select" class="grow"><option>Lens...</option></select>
-                <button id="torch-btn" style="width:30px;">⚡</button>
-            </div>
-            
-            <div class="flex" style="margin-top:6px;">
-                <label for="zoom-slider" style="color:#888; font-size:10px; width:40px;">ZOOM</label>
-                <input type="range" id="zoom-slider" min="1" max="10" step="0.1" value="1" class="grow">
-                <span id="zoom-val" style="width:25px; text-align:right; font-family:monospace;">1.0</span>
-            </div>
-
-            <div class="flex" style="margin-top:6px;">
-                <label for="focus-slider" style="color:#888; font-size:10px; width:40px;">FOCUS</label>
-                <input type="range" id="focus-slider" min="0" max="1" step="0.01" value="0.5" class="grow">
-                <button id="auto-focus-btn" style="padding:2px 6px; font-size:9px;">AF</button>
+            <div class="label">Zoom / Focus</div>
+            <div class="row">
+                <button onclick="changeZoom(-0.5)">-</button>
+                <button onclick="changeZoom(0.5)">+</button>
+                <button id="af-btn">AF</button>
             </div>
         </div>
-
-        <!-- Stream Settings -->
+        
         <div>
-            <div class="section-label">Stream Quality</div>
-            <div class="flex">
-                <select id="res-select" class="grow">
-                    <option value="2160">4K</option>
-                    <option value="1080" selected>1080p</option>
-                    <option value="720">720p</option>
-                </select>
-                <select id="fps-select" style="width: 60px;">
-                    <option value="60">60fps</option>
-                    <option value="30" selected>30fps</option>
-                    <option value="24">24fps</option>
-                </select>
-            </div>
-            <select id="bitrate-select">
-                <option value="250000000" selected>250M</option>
-                <option value="100000000">100M</option>
-                <option value="50000000">50M</option>
-                <option value="15000000">15M</option>
-            </select>
+            <div class="label">Lens</div>
+            <select id="lens-select"><option>Lens...</option></select>
         </div>
 
-        <!-- Multiview Strip -->
         <div>
-            <div class="section-label flex" style="justify-content:space-between;">
-                <span>Switcher</span>
-                <button id="grid-btn" style="padding:2px 6px; font-size:9px;">GRID VIEW</button>
-            </div>
-            <div id="multiview" style="display:flex; gap:6px; overflow-x:auto; padding-bottom:4px;">
+            <div class="label">Switch / Preview</div>
+            <div id="multiview" style="display:flex; gap:5px; overflow-x:auto; padding-bottom:5px; background:#000; border-radius:4px; padding:5px;">
                 <!-- Thumbs injected here -->
             </div>
         </div>
@@ -188,90 +63,43 @@
     <script src="https://cdn.socket.io/4.7.2/socket.io.min.js"></script>
     <script>
         const socket = io({ transports: ['websocket', 'polling'] });
-        
-        const els = {
-            connInd: document.getElementById('conn-ind'),
-            camSelect: document.getElementById('cam-select'),
-            recBtn: document.getElementById('rec-btn'),
-            photoBtn: document.getElementById('photo-btn'),
-            
-            tetherBtn: document.getElementById('tether-btn'),
-            audioBtn: document.getElementById('audio-btn'),
-            trackSelect: document.getElementById('track-select'),
-            
-            lens: document.getElementById('lens-select'),
-            torch: document.getElementById('torch-btn'),
-            
-            zoom: document.getElementById('zoom-slider'),
-            zoomVal: document.getElementById('zoom-val'),
-            
-            focus: document.getElementById('focus-slider'),
-            af: document.getElementById('auto-focus-btn'),
-            
-            res: document.getElementById('res-select'),
-            fps: document.getElementById('fps-select'),
-            bitrate: document.getElementById('bitrate-select'),
-
-            multiview: document.getElementById('multiview'),
-            gridBtn: document.getElementById('grid-btn')
-        };
-
         let activeCamId = null;
         let isRecording = false;
-        let isTethered = false;
-        let isProAudio = false;
-        let isTorch = false;
-        const camNames = {}; // id -> name
+        let zoomLevel = 1.0;
 
-        // --- Socket Events ---
-        socket.on('connect', () => {
-            els.connInd.classList.add('connected');
-            socket.emit('join-remote');
-        });
-        socket.on('disconnect', () => els.connInd.classList.remove('connected'));
+        const els = {
+            camSelect: document.getElementById('cam-select'),
+            recBtn: document.getElementById('rec-btn'),
+            tetherBtn: document.getElementById('tether-btn'),
+            audioBtn: document.getElementById('audio-btn'),
+            lensSelect: document.getElementById('lens-select'),
+            multiview: document.getElementById('multiview')
+        };
+
+        socket.on('connect', () => socket.emit('join-remote'));
 
         socket.on('camera-list', (cams) => {
-            const saved = activeCamId;
+            const unique = [...new Set(cams.map(c => c.id))]; 
+            els.camSelect.innerHTML = unique.map(id => {
+                const c = cams.find(x => x.id === id);
+                return `<option value="${id}">${c.meta.name || id.substr(0,4)}</option>`;
+            }).join('');
             
-            // Ensure uniqueness
-            const uniqueCams = [];
-            const seen = new Set();
-            cams.forEach(c => {
-                if (!seen.has(c.id)) {
-                    seen.add(c.id);
-                    uniqueCams.push(c);
-                }
-            });
-
-            els.camSelect.innerHTML = uniqueCams.map(c => `<option value="${c.id}">${c.meta.name || c.id.substr(0,4)}</option>`).join('');
-            
-            // Rebuild Multiview
+            // Build thumbs
             els.multiview.innerHTML = '';
-            uniqueCams.forEach(c => {
-                camNames[c.id] = c.meta.name || c.id.substr(0,4);
-                createThumb(c.id, camNames[c.id]);
+            unique.forEach(id => {
+                const c = cams.find(x => x.id === id);
+                createThumb(id, c.meta.name || id.substr(0,4));
             });
 
-            if(uniqueCams.length > 0) {
-                if(saved && uniqueCams.find(c => c.id === saved)) {
-                    els.camSelect.value = saved;
-                    selectThumb(saved);
-                }
-                else { 
-                    activeCamId = uniqueCams[0].id; 
-                    els.camSelect.value = activeCamId; 
-                    refreshState(); 
-                    selectThumb(activeCamId);
-                }
-            } else {
-                els.camSelect.innerHTML = '<option>No Cameras</option>';
+            if (unique.length > 0 && !activeCamId) {
+                activeCamId = unique[0];
+                selectThumb(activeCamId);
+                refresh();
             }
         });
 
-        socket.on('camera-joined', () => socket.emit('join-remote'));
-        socket.on('camera-left', () => socket.emit('join-remote'));
-
-        // Preview Updates
+        // Preview Frames
         socket.on('preview-frame', (d) => {
             const img = document.getElementById(`thumb-img-${d.from}`);
             if (img) img.src = d.payload;
@@ -280,24 +108,19 @@
         function createThumb(id, name) {
             const div = document.createElement('div');
             div.id = `thumb-${id}`;
-            div.style.minWidth = "80px";
-            div.style.cursor = "pointer";
-            div.style.opacity = "0.7";
-            div.style.border = "2px solid transparent";
-            div.style.borderRadius = "4px";
+            div.style = "min-width:60px; height:45px; position:relative; cursor:pointer; background:#222; border:1px solid #444; border-radius:3px; overflow:hidden;";
             div.onclick = () => switchCamera(id);
-            
             div.innerHTML = `
-                <img id="thumb-img-${id}" style="width:100%; height:45px; background:#000; object-fit:cover; display:block;">
-                <div style="font-size:9px; background:#222; padding:2px; text-align:center; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">${name}</div>
+                <img id="thumb-img-${id}" style="width:100%; height:100%; object-fit:cover;">
+                <div style="position:absolute; bottom:0; width:100%; background:rgba(0,0,0,0.7); font-size:8px; text-align:center;">${name}</div>
             `;
             els.multiview.appendChild(div);
         }
 
         function selectThumb(id) {
             Array.from(els.multiview.children).forEach(el => {
-                el.style.borderColor = (el.id === `thumb-${id}`) ? '#0a84ff' : 'transparent';
-                el.style.opacity = (el.id === `thumb-${id}`) ? '1' : '0.7';
+                el.style.borderColor = (el.id === `thumb-${id}`) ? '#0a84ff' : '#444';
+                el.style.opacity = (el.id === `thumb-${id}`) ? '1' : '0.6';
             });
         }
 
@@ -305,69 +128,47 @@
             activeCamId = id;
             els.camSelect.value = id;
             selectThumb(id);
-            refreshState();
-            
-            // Switch OBS Program
-            socket.emit('program-change', id);
+            refresh();
+            socket.emit('program-change', id); // Switch OBS view if listening
         }
 
-        els.gridBtn.onclick = () => {
-            socket.emit('program-change', 'grid');
-        };
-
-        // --- Feedback ---
         socket.on('camera-state', d => {
-            if(d.from !== activeCamId) return;
-            isRecording = (d.payload === 'recording');
+            if (d.from !== activeCamId) return;
+            isRecording = (d.payload.state === 'recording' || d.payload === 'recording');
             els.recBtn.classList.toggle('recording', isRecording);
             els.recBtn.innerText = isRecording ? "STOP" : "RECORD";
         });
 
         socket.on('camera-devices', d => {
-            if(d.from !== activeCamId) return;
-            els.lens.innerHTML = d.payload.map(x => `<option value="${x.deviceId}">${x.label || 'Lens'}</option>`).join('');
+            if (d.from !== activeCamId) return;
+            els.lensSelect.innerHTML = d.payload.map(x => `<option value="${x.deviceId}">${x.label || 'Lens'}</option>`).join('');
         });
 
-        socket.on('camera-capabilities', d => {
-            if(d.from !== activeCamId) return;
-            const c = d.payload;
-            if(c.zoom) { els.zoom.min = c.zoom.min; els.zoom.max = c.zoom.max; els.zoom.step = c.zoom.step; }
-        });
-
-        // --- Interaction ---
+        // Controls
+        els.camSelect.onchange = () => { activeCamId = els.camSelect.value; refresh(); };
+        function refresh() { if(activeCamId) socket.emit('request-state', { target: activeCamId }); }
         function send(cmd, payload={}) { if(activeCamId) socket.emit(cmd, { target: activeCamId, payload }); }
-        function refreshState() { if(activeCamId) socket.emit('request-state', { target: activeCamId }); }
-
-        els.camSelect.onchange = () => { activeCamId = els.camSelect.value; refreshState(); };
 
         els.recBtn.onclick = () => send(isRecording ? 'stop-recording' : 'start-recording');
-        els.photoBtn.onclick = () => send('take-photo');
-
-        els.tetherBtn.onclick = () => {
-            isTethered = !isTethered;
-            els.tetherBtn.classList.toggle('active', isTethered);
-            send('set-tether', isTethered);
+        document.getElementById('photo-btn').onclick = () => send('take-photo');
+        document.getElementById('af-btn').onclick = () => send('control-camera', { focusMode: 'continuous' });
+        
+        els.tetherBtn.onclick = () => { 
+            els.tetherBtn.classList.toggle('active'); 
+            send('set-tether', els.tetherBtn.classList.contains('active')); 
         };
-
+        
         els.audioBtn.onclick = () => {
-            isProAudio = !isProAudio;
-            els.audioBtn.classList.toggle('active', isProAudio);
-            send('set-audio-mode', isProAudio ? 'pro' : 'voice');
+            els.audioBtn.classList.toggle('active');
+            send('set-audio-mode', els.audioBtn.classList.contains('active') ? 'pro' : 'voice');
         };
 
-        els.trackSelect.onchange = () => send('set-track-mode', els.trackSelect.value);
+        els.lensSelect.onchange = () => send('switch-lens', els.lensSelect.value);
 
-        els.lens.onchange = () => send('switch-lens', els.lens.value);
-        els.torch.onclick = () => { isTorch = !isTorch; els.torch.classList.toggle('active', isTorch); send('control-camera', { torch: isTorch }); };
-
-        els.zoom.oninput = () => { els.zoomVal.innerText = parseFloat(els.zoom.value).toFixed(1); send('control-camera', { zoom: parseFloat(els.zoom.value) }); };
-        els.focus.oninput = () => send('control-camera', { focusDistance: parseFloat(els.focus.value) });
-        els.af.onclick = () => send('control-camera', { focusMode: 'continuous' });
-
-        els.res.onchange = () => send('control-camera', { resolution: parseInt(els.res.value) });
-        els.fps.onchange = () => send('control-camera', { frameRate: parseInt(els.fps.value) });
-        els.bitrate.onchange = () => send('control-camera', { bitrate: parseInt(els.bitrate.value) });
-
+        function changeZoom(delta) {
+            zoomLevel = Math.max(1, Math.min(10, zoomLevel + delta));
+            send('control-camera', { zoom: zoomLevel });
+        }
     </script>
 </body>
 </html>
