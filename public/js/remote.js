@@ -304,3 +304,72 @@ els.torch.onclick = () => {
     els.torch.classList.toggle('active', torchState);
     sendCmd('control-camera', { torch: torchState });
 };
+
+// --- Tap to Track ---
+els.video.onclick = (e) => {
+    if (trackMode === 'off' || !activeCamId) return;
+    
+    const rect = els.video.getBoundingClientRect();
+    const vw = els.video.videoWidth;
+    const vh = els.video.videoHeight;
+    
+    if (!vw || !vh) return;
+
+    // Calculate the actual displayed rectangle of the video (object-fit: contain)
+    const elRatio = rect.width / rect.height;
+    const vidRatio = vw / vh;
+    
+    let actualW, actualH, offX, offY;
+    
+    if (vidRatio > elRatio) {
+        // Video is wider than element (Letterbox / Black bars top & bottom)
+        actualW = rect.width;
+        actualH = rect.width / vidRatio;
+        offX = 0;
+        offY = (rect.height - actualH) / 2;
+    } else {
+        // Video is taller or same (Pillarbox / Black bars left & right)
+        actualH = rect.height;
+        actualW = rect.height * vidRatio;
+        offX = (rect.width - actualW) / 2;
+        offY = 0;
+    }
+
+    // Click coordinates relative to the video element
+    const clickX = e.clientX - rect.left;
+    const clickY = e.clientY - rect.top;
+
+    // Check if click is inside the actual video area
+    if (clickX < offX || clickX > offX + actualW || clickY < offY || clickY > offY + actualH) {
+        // Clicked in the black bars
+        return;
+    }
+
+    // Normalize coordinates relative to the video frame
+    const x = (clickX - offX) / actualW;
+    const y = (clickY - offY) / actualH;
+    
+    console.log(`[Remote] Track Point: ${x.toFixed(3)}, ${y.toFixed(3)}`);
+    sendCmd('set-track-point', { x, y });
+
+    // Visual Feedback
+    const dot = document.createElement('div');
+    dot.style.position = 'fixed';
+    dot.style.left = `${e.clientX}px`;
+    dot.style.top = `${e.clientY}px`;
+    dot.style.width = '40px';
+    dot.style.height = '40px';
+    dot.style.border = '2px solid #00ff00';
+    dot.style.borderRadius = '50%';
+    dot.style.transform = 'translate(-50%, -50%) scale(0.5)';
+    dot.style.transition = 'transform 0.3s ease, opacity 0.3s ease';
+    dot.style.pointerEvents = 'none';
+    dot.style.zIndex = '1000';
+    document.body.appendChild(dot);
+    
+    requestAnimationFrame(() => {
+        dot.style.transform = 'translate(-50%, -50%) scale(1.5)';
+        dot.style.opacity = '0';
+    });
+    setTimeout(() => dot.remove(), 350);
+};
