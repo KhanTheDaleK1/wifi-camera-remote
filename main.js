@@ -1,10 +1,11 @@
-const { app, BrowserWindow } = require('electron');
+const { app, BrowserWindow, dialog } = require('electron');
 const path = require('path');
 const { fork } = require('child_process');
 const http = require('http');
 
 let mainWindow;
 let serverProcess;
+let serverStarted = false;
 
 function createWindow() {
   mainWindow = new BrowserWindow({
@@ -18,39 +19,63 @@ function createWindow() {
     }
   });
 
-  // Wait for the local Node server to start before loading the UI
-  checkServerAndLoad('http://localhost:3002/studio.html');
+  // Start checking the server
+  checkServerAndLoad('http://localhost:3002/studio.html', 0);
 
   mainWindow.on('closed', function () {
     mainWindow = null;
   });
 }
 
-function checkServerAndLoad(url) {
+function checkServerAndLoad(url, attempts) {
+  if (attempts > 20) {
+    dialog.showErrorBox("Server Error", "The background camera server failed to start after 10 seconds. Please check if another app is using port 3001 or 3002.");
+    return;
+  }
+
   http.get(url, (res) => {
     if (res.statusCode === 200) {
       mainWindow.loadURL(url);
+      serverStarted = true;
     } else {
-      setTimeout(() => checkServerAndLoad(url), 500);
+      setTimeout(() => checkServerAndLoad(url, attempts + 1), 500);
     }
   }).on('error', (err) => {
-    setTimeout(() => checkServerAndLoad(url), 500);
+    setTimeout(() => checkServerAndLoad(url, attempts + 1), 500);
   });
 }
 
 app.on('ready', () => {
-  // 1. Start your existing Node.js server in the background
-  const serverPath = path.join(__dirname, 'src', 'index.js'); 
-  serverProcess = fork(serverPath, [], {
-    env: { ...process.env, PORT: 3001, HTTP_PORT: 3002 },
-    stdio: 'inherit'
-  });
+  try {
+    const serverPath = path.join(__dirname, 'src', 'index.js'); 
+    
+    // Fork the background server process
+    serverProcess = fork(serverPath, [], {
+      env: { 
+        ...process.env, 
+        PORT: 3001, 
+        HTTP_PORT: 3002,
+        NODE_ENV: 'production' 
+      },
+      stdio: 'inherit'
+    });
 
-  // 2. Open the desktop window
-  createWindow();
+    serverProcess.on('error', (err) => {
+      console.error('Failed to start server process:', err);
+    });
+
+    serverProcess.on('exit', (code, signal) => {
+      if (code !== 0 && !serverStarted) {
+        console.error(`Server exited with code ${code} and signal ${signal}`);
+      }
+    });
+
+    createWindow();
+  } catch (e) {
+    console.error('Main Process Error:', e);
+  }
 });
 
-// Clean up the background server when the app is closed
 app.on('window-all-closed', function () {
   if (serverProcess) {
     serverProcess.kill();

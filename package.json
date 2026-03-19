@@ -80,6 +80,8 @@
       "main.js",
       "src/**/*",
       "public/**/*",
+      "certs/**/*",
+      "scripts/**/*",
       "package.json"
     ]
   }
