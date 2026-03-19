@@ -43,6 +43,7 @@
     "mac": {
       "target": [
         "dmg",
+        "pkg",
         "zip"
       ],
       "icon": "public/icons/icon-512.png"

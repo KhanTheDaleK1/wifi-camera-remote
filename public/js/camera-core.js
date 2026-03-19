@@ -97,20 +97,17 @@ class KalmanFilter {
 
 class CinematicTracker {
     constructor() {
-        this.models = { face: null, object: null };
+        this.detector = null;
+        this.faceDetector = null;
         this.mode = 'off';
         this.canvas = document.createElement('canvas');
         this.ctx = this.canvas.getContext('2d', { alpha: false });
-        this.aiSize = 300;
-        this.aiCanvas = document.createElement('canvas');
-        this.aiCanvas.width = this.aiSize;
-        this.aiCanvas.height = this.aiSize;
-        this.aiCtx = this.aiCanvas.getContext('2d', { alpha: false });
-
+        this.aiSize = 256; // Optimized for MediaPipe
+        
         this.isActive = false;
         this.detecting = false;
         this.lastDetectTime = 0;
-        this.detectInterval = 60; 
+        this.detectInterval = 33; // 30fps detection
         
         this.sensor = { w: 1, h: 1 };
         this.vCam = { x: 0, y: 0, w: 1, h: 1 };
@@ -126,19 +123,34 @@ class CinematicTracker {
 
     async load() {
         try {
-            if (window.tf) {
-                await tf.setBackend('webgl').catch(() => tf.setBackend('cpu'));
-                await tf.ready();
+            if (!window.FilesetResolver) {
+                console.warn("[AI] MediaPipe not loaded yet...");
+                return;
             }
-            if (window.blazeface && !this.models.face) {
-                this.models.face = await blazeface.load();
-                console.log("[AI] Face Ready");
-            }
-            if (window.cocoSsd && !this.models.object) {
-                this.models.object = await cocoSsd.load({ base: 'lite_mobilenet_v2' });
-                console.log("[AI] Object Ready");
-            }
-        } catch (e) { console.error("[AI] Load Error:", e); }
+
+            const filesetResolver = await FilesetResolver.forVisionTasks(
+                "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.9/wasm"
+            );
+
+            this.detector = await ObjectDetector.createFromOptions(filesetResolver, {
+                baseOptions: {
+                    modelAssetPath: `https://storage.googleapis.com/mediapipe-models/object_detector/efficientdet_lite0/float16/1/efficientdet_lite0.tflite`,
+                    delegate: "GPU"
+                },
+                scoreThreshold: 0.3,
+                runningMode: "VIDEO"
+            });
+
+            this.faceDetector = await FaceDetector.createFromOptions(filesetResolver, {
+                baseOptions: {
+                    modelAssetPath: `https://storage.googleapis.com/mediapipe-models/face_detector/blaze_face_short_range/float16/1/blaze_face_short_range.tflite`,
+                    delegate: "GPU"
+                },
+                runningMode: "VIDEO"
+            });
+
+            console.log("[AI] MediaPipe Vision Tasks Ready");
+        } catch (e) { console.error("[AI] MediaPipe Load Error:", e); }
     }
 
     setMode(mode) { 
@@ -207,84 +219,71 @@ class CinematicTracker {
     }
 
     async detect() {
-        if (this.detecting || this.mode === 'off') return;
+        if (this.detecting || this.mode === 'off' || !this.detector) return;
         
-        if (!this.models.face && !this.models.object) {
-            this.load();
-            return;
-        }
-
         this.detecting = true;
-        const vw = this.sensor.w;
-        const vh = this.sensor.h;
+        const now = performance.now();
 
-        const scale = Math.min(this.aiSize / vw, this.aiSize / vh);
-        const tx = (this.aiSize - vw * scale) / 2;
-        const ty = (this.aiSize - vh * scale) / 2;
-
-        this.aiCtx.drawImage(this.internalSource, tx, ty, vw * scale, vh * scale);
-
-        let candidates = [];
         try {
-            if (this.mode === 'face' && this.models.face) {
-                const faces = await this.models.face.estimateFaces(this.aiCanvas, false);
-                candidates = faces.map(f => ({
-                    x: (f.topLeft[0] - tx) / scale,
-                    y: (f.topLeft[1] - ty) / scale,
-                    w: (f.bottomRight[0] - f.topLeft[0]) / scale,
-                    h: (f.bottomRight[1] - f.topLeft[1]) / scale,
-                    prob: f.probability[0],
-                    label: 'Face'
-                }));
-            } else if (this.mode === 'object' && this.models.object) {
-                const preds = await this.models.object.detect(this.aiCanvas);
-                candidates = preds.filter(p => p.score > 0.2).map(p => ({
-                    x: (p.bbox[0] - tx) / scale,
-                    y: (p.bbox[1] - ty) / scale,
-                    w: p.bbox[2] / scale,
-                    h: p.bbox[3] / scale,
-                    prob: p.score,
-                    label: p.class
-                }));
+            let result;
+            if (this.mode === 'face' && this.faceDetector) {
+                result = this.faceDetector.detectForVideo(this.internalSource, now);
+            } else if (this.mode === 'object' && this.detector) {
+                result = this.detector.detectForVideo(this.internalSource, now);
+            }
+
+            const candidates = [];
+            if (result && result.detections) {
+                result.detections.forEach(d => {
+                    const b = d.boundingBox;
+                    candidates.push({
+                        x: b.originX,
+                        y: b.originY,
+                        w: b.width,
+                        h: b.height,
+                        prob: d.categories[0].score,
+                        label: d.categories[0].categoryName || 'Face'
+                    });
+                });
+            }
+
+            if (candidates.length > 0) {
+                let best = null;
+                if (this.lockPoint) {
+                    let minDist = Infinity;
+                    candidates.forEach(c => {
+                        const cx = c.x + c.w/2;
+                        const cy = c.y + c.h/2;
+                        const d = Math.hypot(cx - this.lockPoint.x, cy - this.lockPoint.y);
+                        if (d < minDist) { minDist = d; best = c; }
+                    });
+                    if (best && minDist < this.sensor.w * 0.4) {
+                        const filtered = this.kf.filter([best.x, best.y, best.w, best.h]);
+                        this.trackedBox = { x: filtered[0], y: filtered[1], w: filtered[2], h: filtered[3], label: best.label, prob: best.prob };
+                        this.lockPoint = { x: this.trackedBox.x + this.trackedBox.w/2, y: this.trackedBox.y + this.trackedBox.h/2 };
+                        this.lostFrameCount = 0;
+                    } else {
+                        this.lostFrameCount++;
+                    }
+                } else {
+                    const rawBest = candidates.sort((a,b) => (b.w*b.h) - (a.w*a.h))[0];
+                    const filtered = this.kf.filter([rawBest.x, rawBest.y, rawBest.w, rawBest.h]);
+                    this.trackedBox = { x: filtered[0], y: filtered[1], w: filtered[2], h: filtered[3], label: rawBest.label, prob: rawBest.prob };
+                    this.lostFrameCount = 0;
+                }
+            } else {
+                this.lostFrameCount++;
+            }
+
+            if (this.lostFrameCount > 30) {
+                this.trackedBox = null;
+                this.lockPoint = null;
+                this.kf.reset();
             }
         } catch (e) { console.error("[AI] Detect Error:", e); }
 
-        if (candidates.length > 0) {
-            let best = null;
-            if (this.lockPoint) {
-                let minDist = Infinity;
-                candidates.forEach(c => {
-                    const cx = c.x + c.w/2;
-                    const cy = c.y + c.h/2;
-                    const d = Math.hypot(cx - this.lockPoint.x, cy - this.lockPoint.y);
-                    if (d < minDist) { minDist = d; best = c; }
-                });
-                if (best && minDist < this.sensor.w * 0.4) {
-                    const filtered = this.kf.filter([best.x, best.y, best.w, best.h]);
-                    this.trackedBox = { x: filtered[0], y: filtered[1], w: filtered[2], h: filtered[3], label: best.label, prob: best.prob };
-                    this.lockPoint = { x: this.trackedBox.x + this.trackedBox.w/2, y: this.trackedBox.y + this.trackedBox.h/2 };
-                    this.lostFrameCount = 0;
-                } else {
-                    this.lostFrameCount++;
-                }
-            } else {
-                const rawBest = candidates.sort((a,b) => (b.w*b.h) - (a.w*a.h))[0];
-                const filtered = this.kf.filter([rawBest.x, rawBest.y, rawBest.w, rawBest.h]);
-                this.trackedBox = { x: filtered[0], y: filtered[1], w: filtered[2], h: filtered[3], label: rawBest.label, prob: rawBest.prob };
-                this.lostFrameCount = 0;
-            }
-        } else {
-            this.lostFrameCount++;
-        }
-
-        if (this.lostFrameCount > 30) {
-            this.trackedBox = null;
-            this.lockPoint = null;
-            this.kf.reset();
-        }
-
         this.detecting = false;
-        this.lastDetectTime = performance.now();
+        this.lastDetectTime = now;
     }
 
     loop() {
@@ -500,7 +499,10 @@ class CameraSession {
 
     createPeer(id, stream = this.pipeline.getStream()) {
         if (!stream) return;
-        if (this.peers[id]) this.peers[id].close();
+        if (this.peers[id]) {
+            this.peers[id].close();
+            delete this.peers[id];
+        }
         
         const config = {
             iceServers: [{ urls: 'stun:stun.l.google.com:19302' }],
@@ -515,6 +517,20 @@ class CameraSession {
         stream.getTracks().forEach(t => p.addTrack(t, stream));
         
         p.onicecandidate = e => { if(e.candidate) this.socket.emit('camera-candidate', { target: id, payload: e.candidate }); };
+        
+        // Bulletproof Reconnection Logic
+        p.oniceconnectionstatechange = () => {
+            console.log(`[WebRTC] Peer ${id} state: ${p.iceConnectionState}`);
+            if (p.iceConnectionState === 'disconnected' || p.iceConnectionState === 'failed') {
+                console.warn(`[WebRTC] Connection lost with ${id}. Attempting recovery...`);
+                setTimeout(() => {
+                    if (this.peers[id] === p && (p.iceConnectionState === 'disconnected' || p.iceConnectionState === 'failed')) {
+                        this.createPeer(id);
+                    }
+                }, 3000);
+            }
+        };
+
         p.createOffer({
             offerToReceiveAudio: true,
             offerToReceiveVideo: true
