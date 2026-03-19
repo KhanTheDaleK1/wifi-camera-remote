@@ -19,7 +19,8 @@
     "webrtc",
     "asmr"
   ],
-  "author": "Open Source",
+  "author": "Open Source <support@example.com>",
+  "maintainer": "Open Source <support@example.com>",
   "license": "MIT",
   "type": "commonjs",
   "dependencies": {
