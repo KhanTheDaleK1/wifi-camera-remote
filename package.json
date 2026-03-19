@@ -1,7 +1,8 @@
 {
   "name": "wifi-camera-remote",
   "version": "1.0.0",
-  "description": "Studio Master Hub for WiFi Cameras",
+  "description": "Professional Studio Hub for WiFi Cameras",
+  "homepage": "https://github.com/KhanTheDaleK1/wifi-camera-remote",
   "main": "main.js",
   "scripts": {
     "start": "node src/index.js",
@@ -19,7 +20,7 @@
     "webrtc",
     "asmr"
   ],
-  "author": "Open Source <support@example.com>",
+  "author": "Open Source",
   "maintainer": "Open Source <support@example.com>",
   "license": "MIT",
   "type": "commonjs",
