@@ -62,6 +62,39 @@ class UploadManager {
     }
 }
 
+class KalmanFilter {
+    constructor() {
+        this.reset();
+    }
+
+    reset() {
+        this.x = null; // [x, y, w, h]
+        this.p = 1;    // Error covariance
+        this.q = 0.05; // Process noise
+        this.r = 0.5;  // Measurement noise
+    }
+
+    filter(obs) {
+        if (!this.x) {
+            this.x = obs;
+            return obs;
+        }
+
+        // Prediction
+        const x_p = this.x;
+        const p_p = this.p + this.q;
+
+        // Gain
+        const k = p_p / (p_p + this.r);
+
+        // Update
+        this.x = x_p.map((val, i) => val + k * (obs[i] - val));
+        this.p = (1 - k) * p_p;
+
+        return this.x;
+    }
+}
+
 class CinematicTracker {
     constructor() {
         this.models = { face: null, object: null };
@@ -88,6 +121,7 @@ class CinematicTracker {
         this.manualZoom = 1.0;
         this.rawStream = null;
         this.outputStream = null;
+        this.kf = new KalmanFilter();
     }
 
     async load() {
@@ -112,6 +146,7 @@ class CinematicTracker {
         this.lockPoint = null;
         this.trackedBox = null;
         this.lostFrameCount = 0;
+        this.kf.reset();
         console.log(`[AI] Mode: ${mode}`);
     }
 
@@ -225,14 +260,17 @@ class CinematicTracker {
                     if (d < minDist) { minDist = d; best = c; }
                 });
                 if (best && minDist < this.sensor.w * 0.4) {
-                    this.trackedBox = best;
-                    this.lockPoint = { x: best.x + best.w/2, y: best.y + best.h/2 };
+                    const filtered = this.kf.filter([best.x, best.y, best.w, best.h]);
+                    this.trackedBox = { x: filtered[0], y: filtered[1], w: filtered[2], h: filtered[3], label: best.label, prob: best.prob };
+                    this.lockPoint = { x: this.trackedBox.x + this.trackedBox.w/2, y: this.trackedBox.y + this.trackedBox.h/2 };
                     this.lostFrameCount = 0;
                 } else {
                     this.lostFrameCount++;
                 }
             } else {
-                this.trackedBox = candidates.sort((a,b) => (b.w*b.h) - (a.w*a.h))[0];
+                const rawBest = candidates.sort((a,b) => (b.w*b.h) - (a.w*a.h))[0];
+                const filtered = this.kf.filter([rawBest.x, rawBest.y, rawBest.w, rawBest.h]);
+                this.trackedBox = { x: filtered[0], y: filtered[1], w: filtered[2], h: filtered[3], label: rawBest.label, prob: rawBest.prob };
                 this.lostFrameCount = 0;
             }
         } else {
@@ -242,6 +280,7 @@ class CinematicTracker {
         if (this.lostFrameCount > 30) {
             this.trackedBox = null;
             this.lockPoint = null;
+            this.kf.reset();
         }
 
         this.detecting = false;
