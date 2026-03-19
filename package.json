@@ -20,7 +20,10 @@
     "webrtc",
     "asmr"
   ],
-  "author": "Open Source",
+  "author": {
+    "name": "Open Source",
+    "email": "support@example.com"
+  },
   "maintainer": "Open Source <support@example.com>",
   "license": "MIT",
   "type": "commonjs",
@@ -58,6 +61,7 @@
       "icon": "public/icons/icon-512.png"
     },
     "linux": {
+      "maintainer": "support@example.com",
       "target": [
         "AppImage",
         "deb",
