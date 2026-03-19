@@ -1,7 +1,7 @@
 {
   "name": "wifi-camera-remote",
   "version": "1.0.0",
-  "description": "Turn your smartphone into a high-quality, wireless webcam with advanced controls and OBS integration.",
+  "description": "Studio Master Hub for WiFi Cameras",
   "main": "main.js",
   "scripts": {
     "start": "node src/index.js",
@@ -35,35 +35,45 @@
     "wait-on": "^8.0.2"
   },
   "build": {
-    "appId": "com.studio.wificameraremote",
+    "appId": "com.khanthedalek1.wificameraremote",
     "productName": "WiFi Camera Remote",
     "directories": {
       "output": "dist"
+    },
+    "mac": {
+      "target": [
+        "dmg",
+        "zip"
+      ],
+      "icon": "public/icons/icon-512.png"
+    },
+    "win": {
+      "target": [
+        "nsis",
+        "zip"
+      ],
+      "icon": "public/icons/icon-512.png"
+    },
+    "linux": {
+      "target": [
+        "AppImage",
+        "deb",
+        "tar.gz"
+      ],
+      "icon": "public/icons/icon-512.png",
+      "category": "AudioVideo"
+    },
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": true,
+      "runAfterFinish": true
     },
     "files": [
       "main.js",
       "src/**/*",
       "public/**/*",
       "package.json"
-    ],
-    "win": {
-      "target": "nsis"
-    },
-    "nsis": {
-      "oneClick": true,
-      "perMachine": false,
-      "allowToChangeInstallationDirectory": false,
-      "createDesktopShortcut": true,
-      "runAfterFinish": true
-    },
-    "mac": {
-      "target": "dmg",
-      "hardenedRuntime": true,
-      "gatekeeperAssess": false
-    },
-    "linux": {
-      "target": "deb",
-      "category": "AudioVideo"
-    }
+    ]
   }
 }

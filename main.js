@@ -1,4 +1,3 @@
-// main.js
 const { app, BrowserWindow } = require('electron');
 const path = require('path');
 const { fork } = require('child_process');
@@ -7,20 +6,11 @@ const http = require('http');
 let mainWindow;
 let serverProcess;
 
-function startNodeServer() {
-  // Forks your existing server process so it runs alongside the UI
-  const serverPath = path.join(__dirname, 'src', 'index.js'); 
-  serverProcess = fork(serverPath, [], {
-    env: { ...process.env, PORT: 3001, HTTP_PORT: 3002 }, // Use current defaults
-    stdio: 'inherit'
-  });
-}
-
 function createWindow() {
   mainWindow = new BrowserWindow({
     width: 1280,
     height: 800,
-    title: "WiFi Camera Remote - Studio Hub",
+    title: "WiFi Camera Remote - Studio Master Hub",
     autoHideMenuBar: true,
     webPreferences: {
       nodeIntegration: false,
@@ -28,25 +18,35 @@ function createWindow() {
     }
   });
 
-  // Wait for the local server to be ready before loading the UI
-  const checkServer = setInterval(() => {
-    http.get('http://localhost:3002/studio.html', (res) => {
-      if (res.statusCode === 200) {
-        clearInterval(checkServer);
-        mainWindow.loadURL('http://localhost:3002/studio.html');
-      }
-    }).on('error', () => {
-      // Server not ready yet, keep waiting
-    });
-  }, 500);
+  // Wait for the local Node server to start before loading the UI
+  checkServerAndLoad('http://localhost:3002/studio.html');
 
   mainWindow.on('closed', function () {
     mainWindow = null;
   });
 }
 
+function checkServerAndLoad(url) {
+  http.get(url, (res) => {
+    if (res.statusCode === 200) {
+      mainWindow.loadURL(url);
+    } else {
+      setTimeout(() => checkServerAndLoad(url), 500);
+    }
+  }).on('error', (err) => {
+    setTimeout(() => checkServerAndLoad(url), 500);
+  });
+}
+
 app.on('ready', () => {
-  startNodeServer();
+  // 1. Start your existing Node.js server in the background
+  const serverPath = path.join(__dirname, 'src', 'index.js'); 
+  serverProcess = fork(serverPath, [], {
+    env: { ...process.env, PORT: 3001, HTTP_PORT: 3002 },
+    stdio: 'inherit'
+  });
+
+  // 2. Open the desktop window
   createWindow();
 });
 
